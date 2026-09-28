@@ -3,7 +3,7 @@
 > Une interface locale pour utiliser des modèles d'IA directement depuis votre machine, avec une intégration **Ollama optionnelle**.
 
 <!-- VERSION:START -->
-**Version actuelle : `0.1.7`**
+**Version actuelle : `0.2.0`**
 <!-- VERSION:END -->
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
@@ -133,6 +133,53 @@ Le contenu ci-dessous est **généré automatiquement** à partir de ces deux fi
 ### 📝 Journal des mises à jour
 
 <!-- UPDATES:START -->
+<details>
+<summary>Version `0.2.0.0(beta1+2)` — 2026-09-24 · **Lecture de fichier + lancement de programme (beta1+2)**</summary>
+
+- Ajout de la possibilité de l'ia de lancer des programme via une demande simple, pas de commande necessaire.
+
+</details>
+
+<details>
+<summary>Version `0.2.0.1(beta3)` — 2026-09-26 · **Refonte IA + validation de phases (beta3)**</summary>
+
+- Phase 1 : centralisation du flux IA avec RequestRouter, ContextCompiler et ToolManager.
+- Phase 2 : ajout du routeur et du fast path pour les actions simples et déterministes.
+- Phase 3 : sélection dynamique des outils selon la route et réductions des outils envoyés au modèle.
+- Phase 4 : compilation du contexte en blocs structurés pour les prompts.
+- Phase 5 : historique compact avec résumé et fenêtre récente pour réduire le poids du contexte.
+- Phase 6 : mémoire SQLite avec tri de pertinence et maintien de l'API historique.
+- Phases 7 à 10 : recherche mémoire sémantique, compression des résultats outils, boucle de contrôle des outils, et écriture asynchrone.
+- Phase 11 : cache des prompts et des blocs de contexte pour éviter les recalculs inutiles.
+- Phase 12 : session Ollama centralisée avec gestion unique des appels LLM.
+- Phase 13 : support du streaming optionnel sans surcharge sur les appels internes.
+- Phase 14 : extraction mémoire filtrée et déduplication avant sauvegarde.
+- Phase 15 : centralisation des conversations et réduction de la duplication du code.
+- Phase 16 : validation de non-régression sur les flux critiques et correction du cache de prompt.
+- Phase 17 : benchmark final avec scénarios critiques et métriques détaillées.
+- Phase 18 : seuils de performance et validation automatique.
+- Phase 19 : ordre de déploiement recommandé pour la structure finale.
+- Phase 20 : architecture cible documentée et exposée sans réécriture complète du projet.
+- Le projet est aujourd'hui cohérent, testé et stable : 116 tests passent.
+
+</details>
+
+<details>
+<summary>Version `0.2.0.2(beta4)` — 2026-09-26 · **Utilisation de la nouvelle API OpenRouter (beta4)**</summary>
+
+- Ajout de la possibilité d'utiliser l'API OpenRouter pour les modèles LLM.
+- Ajout d'une option de configuration pour choisir entre Ollama et OpenRouter.
+- Mise à jour de la documentation pour inclure les instructions d'utilisation d'OpenRouter.
+
+</details>
+
+<details>
+<summary>Version `0.1.8` — 2026-09-23 · **Lecture de fichier**</summary>
+
+- Ajout d'une commande dans le chat qui permet de donner a l'ia un fichier. (/fichier chemin/vers/le/fichier). Pour l'instant, lecture uniquement.
+
+</details>
+
 <details>
 <summary>Version `0.1.7` — 2026-09-23 · **interface plein écran globale**</summary>
 
