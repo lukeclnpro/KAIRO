@@ -3,7 +3,7 @@
 > Une interface locale pour utiliser des modèles d'IA directement depuis votre machine, avec une intégration **Ollama optionnelle**.
 
 <!-- VERSION:START -->
-**Version actuelle : `0.2.0.4`**
+**Version actuelle : `0.2.0`**
 <!-- VERSION:END -->
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
