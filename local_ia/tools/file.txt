@@ -1,0 +1,16 @@
+OUTIL : file.py
+
+ROLE
+Lit un fichier autorisé et retourne son contenu ainsi que ses informations.
+
+PARAMETRES
+path : chemin absolu ou chemin relatif autorisé.
+extension : extension facultative, par exemple txt ou json.
+
+EXEMPLES
+<tool_call>{"tool":"file","arguments":{"path":"Telechargements/notes.txt"}}</tool_call>
+<tool_call>{"tool":"read_file","path":"/home/utilisateur/notes.txt"}</tool_call>
+
+REGLES
+Les dossiers Downloads et Téléchargements sont résolus vers le dossier réel de
+l'utilisateur. Les chemins hors des racines autorisées sont refusés.

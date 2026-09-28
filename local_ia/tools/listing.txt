@@ -1,0 +1,10 @@
+OUTIL : listing.py (appel IA : "list")
+
+ROLE
+Liste le contenu d'un dossier autorisé (dossiers d'abord, 200 entrées maximum).
+
+PARAMETRE
+path : dossier à lister (« . » = dossier du projet).
+
+EXEMPLE
+<tool_call>{"tool":"list","arguments":{"path":"Documents"}}</tool_call>

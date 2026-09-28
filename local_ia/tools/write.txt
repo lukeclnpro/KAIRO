@@ -1,0 +1,20 @@
+OUTIL : write.py
+
+ROLE
+Crée ou modifie un fichier avec le contenu demandé.
+
+PARAMETRES
+path : chemin du fichier. Les dossiers Downloads/Téléchargements sont reconnus.
+content : texte complet à écrire.
+extension : extension facultative, ajoutée au nom si elle est absente.
+
+EXEMPLE
+<tool_call>{"tool":"write","arguments":{"path":"Telechargements/note","content":"Bonjour","extension":"txt"}}</tool_call>
+
+RESULTAT ATTENDU
+Le fichier devient Telechargements/note.txt et contient exactement le texte
+fourni.
+
+REGLES
+Respecter les racines autorisées et les limites de taille. Ne pas remplacer un
+fichier sans que l'utilisateur ait demandé sa modification.

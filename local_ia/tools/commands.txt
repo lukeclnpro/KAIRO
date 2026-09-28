@@ -1,0 +1,17 @@
+OUTIL : commands.py
+
+ROLE
+Façade de compatibilité vers command_commands.py.
+
+UTILISATION
+parse_command(message) analyse une commande /commande.
+execute_argv(argv, timeout=30) exécute une liste d'arguments sans shell.
+execute_command(message, timeout=30) combine l'analyse et l'exécution.
+
+EXEMPLE
+<tool_call>{"tool":"command","arguments":{"argv":["echo","bonjour"]}}</tool_call>
+
+REGLES
+argv doit être une liste de chaînes. Les pipes, redirections et interpréteurs
+shell ne sont pas autorisés. La sortie est limitée et l'exécution expire après
+le délai maximal.

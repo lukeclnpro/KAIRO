@@ -22,7 +22,7 @@ import ui
 BASE_DIR = Path(__file__).resolve().parent
 
 LIST_FILE = BASE_DIR / "list.json"
-AGENT_FILE = BASE_DIR / "ia_agent.py"
+AGENT_FILE = BASE_DIR / "local_ia" / "cli" / "interface.py"
 CONFIG_FILE = BASE_DIR / "config.py"
 CHAT_DIR = BASE_DIR / "chats"
 GITHUB_REPO = "https://github.com/lukeclnpro/local_ia"
@@ -475,6 +475,56 @@ def load_config():
 
         return {}
 
+
+def resolve_runtime_provider():
+    """Retourne le fournisseur LLM actif pour cette session."""
+    provider = os.environ.get("LOCAL_IA_PROVIDER", "").strip().lower()
+    if provider in {"openrouter", "ollama", "local"}:
+        return "openrouter" if provider == "openrouter" else "local"
+    return "local"
+
+
+def select_runtime_provider():
+    """Demande le fournisseur au lancement sans l'enregistrer dans config.json."""
+    current = resolve_runtime_provider()
+    if current == "openrouter":
+        return
+
+    ui.clear_screen()
+    ui.full_menu(
+        "PROVIDEUR IA",
+        [
+            ("1", "IA locale (Ollama)"),
+            ("2", "OpenRouter (clé API saisie au lancement)"),
+        ],
+        footer="Choisissez le mode d'IA pour cette session : ",
+    )
+
+    while True:
+        choice = ui.prompt("Votre choix : ").strip().lower()
+
+        if choice == "1":
+            os.environ.pop("LOCAL_IA_PROVIDER", None)
+            os.environ.pop("LOCAL_IA_OPENROUTER_KEY", None)
+            os.environ.pop("LOCAL_IA_OPENROUTER_MODEL", None)
+            os.environ.pop("LOCAL_IA_OPENROUTER_BASE_URL", None)
+            return
+
+        if choice == "2":
+            api_key = ui.prompt("Clé API OpenRouter (non stockée localement) : ").strip()
+            if not api_key:
+                ui.print_error("Une clé OpenRouter est requise.")
+                pause()
+                continue
+            os.environ["LOCAL_IA_PROVIDER"] = "openrouter"
+            os.environ["LOCAL_IA_OPENROUTER_KEY"] = api_key
+            os.environ.setdefault("LOCAL_IA_OPENROUTER_MODEL", "openai/gpt-4o-mini")
+            os.environ.setdefault("LOCAL_IA_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+            return
+
+        ui.print_error("Choix invalide.")
+        pause()
+
 def save_config(config):
     """
     Enregistre config.json.
@@ -585,9 +635,8 @@ def select_chat():
 
 def launch_ai():
     """
-    Scanne les modèles installés, demande à l'utilisateur
-    lequel utiliser, sauvegarde son choix dans config.json,
-    puis lance ia_agent.py.
+    Démarre l'IA en fonction du fournisseur choisi pour cette session.
+    La clé OpenRouter n'est pas enregistrée dans config.json.
     """
     ui.clear_screen()
 
@@ -600,102 +649,105 @@ def launch_ai():
 
         return
 
-    # --------------------------------------------------------
-    # SCAN DES MODELES
-    # --------------------------------------------------------
+    provider = resolve_runtime_provider()
 
-    print()
-    print("Recherche des modèles installés...")
-    print()
+    if provider == "openrouter":
+        selected_model = os.environ.get("LOCAL_IA_OPENROUTER_MODEL", "openai/gpt-4o-mini")
+        ui.print_ok("Mode OpenRouter activé pour cette session.")
+        ui.print_info("La clé API n'est pas stockée dans config.json.")
+        print()
+    else:
+        # --------------------------------------------------------
+        # SCAN DES MODELES
+        # --------------------------------------------------------
 
-    models = scan_models()
+        print()
+        print("Recherche des modèles installés...")
+        print()
 
-    if not models:
+        models = scan_models()
 
-        print(
-            "[ERREUR] Aucun modèle Ollama installé."
-        )
+        if not models:
 
-        print(
-            "Installez d'abord un modèle avec "
-            "l'option 3."
-        )
+            print(
+                "[ERREUR] Aucun modèle Ollama installé."
+            )
 
-        return
-
-    # --------------------------------------------------------
-    # CHOIX DU MODELE
-    # --------------------------------------------------------
-
-    while True:
-
-        options = []
-
-        for number, model in enumerate(models, start=1):
-
-            description = get_model_description(model["name"])
-            label = f"{model['name']}  ({model['size']})"
-
-            if description:
-                label += f" — {description}"
-
-            options.append((str(number), label))
-
-        options.append(("0", "Annuler"))
-
-        ui.full_menu(
-            "LANCER L'IA LOCALE",
-            options,
-            subtitle="Modèles installés",
-            footer="Sur quel modèle voulez-vous lancer l'IA ?",
-        )
-
-        choice = ui.prompt("Votre choix : ").strip()
-
-        if not choice.isdigit():
-
-            ui.print_error("Choix invalide.")
-
-            pause()
-            continue
-
-        number = int(choice)
-
-        if number == 0:
+            print(
+                "Installez d'abord un modèle avec "
+                "l'option 3."
+            )
 
             return
 
-        if number < 1 or number > len(models):
+        # --------------------------------------------------------
+        # CHOIX DU MODELE
+        # --------------------------------------------------------
 
-            ui.print_error("Choix invalide.")
+        while True:
+
+            options = []
+
+            for number, model in enumerate(models, start=1):
+
+                description = get_model_description(model["name"])
+                label = f"{model['name']}  ({model['size']})"
+
+                if description:
+                    label += f" — {description}"
+
+                options.append((str(number), label))
+
+            options.append(("0", "Annuler"))
+
+            ui.full_menu(
+                "LANCER L'IA LOCALE",
+                options,
+                subtitle="Modèles installés",
+                footer="Sur quel modèle voulez-vous lancer l'IA ?",
+            )
+
+            choice = ui.prompt("Votre choix : ").strip()
+
+            if not choice.isdigit():
+
+                ui.print_error("Choix invalide.")
+
+                pause()
+                continue
+
+            number = int(choice)
+
+            if number == 0:
+
+                return
+
+            if number < 1 or number > len(models):
+
+                ui.print_error("Choix invalide.")
+
+                pause()
+                continue
+
+            selected_model = models[number - 1]["name"]
+
+            break
+
+        config = load_config()
+        config["model"] = selected_model
+
+        if not save_config(config):
+
+            ui.print_error(
+                "Le modèle n'a pas pu être enregistré dans config.json."
+            )
 
             pause()
-            continue
+            return
 
-        selected_model = models[number - 1]["name"]
-
-        break
-
-    # --------------------------------------------------------
-    # MODIFICATION DE CONFIG.JSON
-    # --------------------------------------------------------
-
-    config = load_config()
-
-    config["model"] = selected_model
-
-    if not save_config(config):
-
-        ui.print_error(
-            "Le modèle n'a pas pu être enregistré dans config.json."
-        )
-
-        pause()
-        return
-
-    print()
-    ui.print_ok(f"Modèle sélectionné : {selected_model}")
-    ui.print_ok("config.json mis à jour.")
+        print()
+        ui.print_ok(f"Modèle sélectionné : {selected_model}")
+        ui.print_ok("config.json mis à jour.")
 
     # --------------------------------------------------------
     # CHOIX DE LA CONVERSATION
@@ -711,7 +763,7 @@ def launch_ai():
     chat_mode, chat_id = chat_selection
 
     # --------------------------------------------------------
-    # LANCEMENT DE IA_AGENT.PY
+    # LANCEMENT DE L'INTERFACE CLI MODULAIRE
     # --------------------------------------------------------
 
     print()
@@ -728,15 +780,15 @@ def launch_ai():
 
     print()
 
-    # Variable d'environnement utilisée par ia_agent.py
+    # Variables d'environnement utilisées par l'interface CLI
     # pour savoir quelle conversation ouvrir au démarrage.
     agent_env = os.environ.copy()
-    agent_env["IA_AGENT_CHAT_MODE"] = chat_mode
+    agent_env["LOCAL_IA_CHAT_MODE"] = chat_mode
 
     if chat_id is not None:
-        agent_env["IA_AGENT_CHAT_ID"] = str(chat_id)
+        agent_env["LOCAL_IA_CHAT_ID"] = str(chat_id)
     else:
-        agent_env.pop("IA_AGENT_CHAT_ID", None)
+        agent_env.pop("LOCAL_IA_CHAT_ID", None)
 
     try:
 
@@ -2082,7 +2134,7 @@ def edit_ai_config():
         return
 
     env = os.environ.copy()
-    env["IA_AGENT_CONFIG_FROM_MAIN"] = "1"
+    env["LOCAL_IA_CONFIG_FROM_MAIN"] = "1"
 
     try:
         subprocess.run(
@@ -2519,13 +2571,15 @@ def main():
 
     ui.section_title("OLLAMA LOCAL AI")
 
-    if not check_ollama():
+    select_runtime_provider()
 
-        pause()
-        sys.exit(1)
+    if resolve_runtime_provider() == "local":
+        if not check_ollama():
+            pause()
+            sys.exit(1)
 
-    # Scan automatique au démarrage
-    scan_models()
+        # Scan automatique au démarrage uniquement en mode local
+        scan_models()
 
     menu()
 

@@ -1,0 +1,19 @@
+OUTIL : edit.py
+
+ROLE
+Modifie une partie d'un fichier en remplaçant un texte exact. Sert surtout à
+corriger un bug sans réécrire tout le fichier.
+
+PARAMETRES
+path : chemin du fichier (dossiers autorisés seulement).
+old : texte exact à remplacer (doit apparaître une seule fois).
+new : texte de remplacement.
+replace_all : true pour remplacer toutes les occurrences.
+
+EXEMPLE
+<tool_call>{"tool":"edit","arguments":{"path":"app.py","old":"print(valeur)","new":"print('ok')"}}</tool_call>
+
+REGLES
+Une sauvegarde est copiée dans .local_ia_backups/ avant chaque modification.
+Un fichier Python valide ne peut pas devenir invalide : la modification est
+alors refusée. Lire le fichier (file) avant de le modifier.

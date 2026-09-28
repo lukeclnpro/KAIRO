@@ -5,7 +5,7 @@
 Module d'interface partagé.
 
 Fournit :
-    - les couleurs ANSI utilisées par main.py, ia_agent.py et config.py
+    - les couleurs ANSI utilisées par main.py, local_ia et config.py
     - les menus "plein écran" (largeur ET hauteur du terminal)
     - des utilitaires d'affichage (horodatage, séparateurs, messages
       colorés OK / ERREUR / ATTENTION / INFO)

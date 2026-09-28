@@ -1,0 +1,15 @@
+OUTIL : launch.py
+
+ROLE
+Lance une application installée sur l'ordinateur.
+
+PARAMETRE
+name : nom affiché ou nom courant de l'application, par exemple Spotify.
+
+EXEMPLES
+<tool_call>{"tool":"launch","name":"spotify"}</tool_call>
+<tool_call>{"tool":"launch","arguments":{"name":"LibreOffice"}}</tool_call>
+
+REGLES
+Lancer uniquement l'application explicitement demandée. Si l'application est
+introuvable, retourner l'erreur sans prétendre qu'elle a été lancée.

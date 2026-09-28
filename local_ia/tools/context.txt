@@ -1,0 +1,15 @@
+OUTIL : context.py
+
+ROLE
+Lit le contexte permanent configuré dans context.json.
+
+UTILISATION
+use() ne prend aucun paramètre et retourne un dictionnaire contenant la langue,
+le rôle, le sujet, le ton, le style et les instructions.
+
+EXEMPLE
+<tool_call>{"tool":"context","arguments":{}}</tool_call>
+
+REGLES
+Utiliser cet outil lorsque la demande concerne les règles, le rôle, la langue
+ou les préférences générales de l'assistant. Ne pas inventer de valeur absente.

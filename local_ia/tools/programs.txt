@@ -1,0 +1,15 @@
+OUTIL : programs.py
+
+ROLE
+Façade de compatibilité vers program_commands.py pour lancer un programme local.
+
+UTILISATION
+parse_command(message) analyse /execute ou /executer.
+execute_command(message) lance le programme demandé avec ses arguments.
+
+EXEMPLE
+/executer "/chemin/vers/programme.py" argument
+
+REGLES
+Le programme doit être un fichier autorisé. L'exécution ne passe pas par un
+shell et les sorties sont limitées.

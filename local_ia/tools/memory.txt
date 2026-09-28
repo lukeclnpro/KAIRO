@@ -1,0 +1,16 @@
+OUTIL : memory.py
+
+ROLE
+Consulte l'historique de la conversation et les souvenirs persistants.
+
+PARAMETRES
+connection : connexion SQLite de l'agent.
+chat : conversation courante.
+limit : nombre maximal de messages, 12 par défaut.
+
+EXEMPLE
+<tool_call>{"tool":"memory","arguments":{}}</tool_call>
+
+REGLES
+Utiliser les souvenirs uniquement s'ils sont pertinents pour la demande. Ne
+jamais présenter une mémoire absente comme une information certaine.

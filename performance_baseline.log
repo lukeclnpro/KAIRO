@@ -1,0 +1,13 @@
+request_id=baseline-2026-09-25
+route=full-suite
+model=local
+prompt_chars=2056
+history_messages=not_limited_baseline
+memory_items=unknown_baseline
+tools_count=10
+ollama_calls=not_measured_in_unit_suite
+duration_ms=215
+first_token_ms=not_measured
+tool_steps=not_measured
+test_count=98
+status=baseline_snapshot

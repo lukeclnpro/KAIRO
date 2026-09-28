@@ -1,0 +1,21 @@
+OUTIL : system.py
+
+ROLE
+Effectue des actions système courantes.
+
+ACTIONS
+up ou increase : augmenter le volume.
+down ou decrease : diminuer le volume.
+mute : couper le son.
+unmute : rétablir le son.
+install : préparer l'installation d'un paquet.
+update : préparer la mise à jour du système.
+
+EXEMPLES
+<tool_call>{"tool":"system","arguments":{"action":"up","amount":5}}</tool_call>
+<tool_call>{"tool":"volume","action":"mute"}</tool_call>
+<tool_call>{"tool":"install","value":"firefox"}</tool_call>
+
+SECURITE
+Les installations et mises à jour retournent d'abord confirmation_required.
+Elles ne sont exécutées qu'après une confirmation explicite de l'utilisateur.

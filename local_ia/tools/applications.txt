@@ -1,0 +1,19 @@
+OUTIL : applications.py
+
+ROLE
+Recherche une application installée et la lance.
+
+UTILISATION PYTHON
+find_application(nom)
+  Retourne les informations de l'application ou None.
+
+launch_application(nom)
+  Lance l'application trouvée dans un processus séparé.
+
+EXEMPLES D'APPEL IA
+<tool_call>{"tool":"launch","name":"spotify"}</tool_call>
+<tool_call>{"tool":"launch_application","arguments":{"name":"Spotify"}}</tool_call>
+
+REGLES
+Le nom doit correspondre à une application installée. L'outil ne lance pas de
+commande shell et ne doit être utilisé que lorsque l'utilisateur le demande.

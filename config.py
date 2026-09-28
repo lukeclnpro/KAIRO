@@ -56,6 +56,14 @@ DEFAULT_CONFIG = {
         "timeout": 120,
         "stream": False,
     },
+    "openrouter": {
+        "api_key": "",
+        "model": "openai/gpt-4o-mini",
+        "base_url": "https://openrouter.ai/api/v1",
+        "timeout": 120,
+        "site_url": "",
+        "app_name": "Local IA",
+    },
     "conversation": {
         "max_history": 20,
         "max_conversations": 100,
@@ -382,6 +390,56 @@ def modifier_ollama(config):
     sauvegarder_config(config)
 
 
+def modifier_openrouter(config):
+    afficher_titre("OPENROUTER")
+
+    print("1. Clé API")
+    print("2. Modèle")
+    print("3. Base URL")
+    print("4. Timeout")
+    print("5. Site URL")
+    print("6. Nom de l'application")
+    print("0. Retour")
+
+    choix = input("\nChoisissez un seul champ à modifier : ").strip()
+    openrouter = config.setdefault("openrouter", {
+        "api_key": "",
+        "model": "openai/gpt-4o-mini",
+        "base_url": "https://openrouter.ai/api/v1",
+        "timeout": 120,
+        "site_url": "",
+        "app_name": "Local IA",
+    })
+
+    if choix == "1":
+        print("\nClé API OpenRouter : la valeur est utilisée pour appeler le provider cloud.")
+        openrouter["api_key"] = demander_texte("Clé OpenRouter : ", openrouter.get("api_key", ""))
+
+    elif choix == "2":
+        print("\nModèle OpenRouter : exemple openai/gpt-4o-mini, anthropic/claude-3.5-sonnet...")
+        openrouter["model"] = demander_texte("Modèle OpenRouter : ", openrouter.get("model", "openai/gpt-4o-mini"))
+
+    elif choix == "3":
+        print("\nBase URL OpenRouter. Laissez la valeur par défaut pour l'API standard.")
+        openrouter["base_url"] = demander_texte("Base URL OpenRouter : ", openrouter.get("base_url", "https://openrouter.ai/api/v1"))
+
+    elif choix == "4":
+        print("\nTimeout : durée maximale d'attente d'une réponse OpenRouter.")
+        openrouter["timeout"] = demander_entier("Nouveau timeout : ", openrouter.get("timeout", 120))
+
+    elif choix == "5":
+        print("\nSite URL : URL du site qui appelle OpenRouter. Utile pour les metadonnées du provider.")
+        openrouter["site_url"] = demander_texte("Site URL : ", openrouter.get("site_url", ""))
+
+    elif choix == "6":
+        print("\nNom de l'application : identifiant visible côté OpenRouter.")
+        openrouter["app_name"] = demander_texte("Nom de l'application : ", openrouter.get("app_name", "Local IA"))
+    else:
+        return
+
+    sauvegarder_config(config)
+
+
 def modifier_conversation(config):
     afficher_titre("CONVERSATION")
 
@@ -542,6 +600,7 @@ def afficher_resume(config):
     print(f"Style        : {config['assistant']['style']}")
     print(f"Modèle       : {config['ollama']['model'] or '(non défini)'}")
     print(f"URL Ollama   : {config['ollama']['url']}")
+    print(f"OpenRouter   : {'configuré' if config.get('openrouter', {}).get('api_key') else 'non configuré'}")
     print(f"Mémoire      : {'activée' if config['memoire']['active'] else 'désactivée'}")
     print(f"Recherche    : {'activée' if config['recherche']['active'] else 'désactivée'}")
     print(f"Instructions : {len(config['instructions'])}")
@@ -574,7 +633,7 @@ def retourner_main():
 
     # Lorsque config.py est lancé depuis main.py, main.py est déjà
     # en attente : il suffit donc de fermer config.py.
-    if os.environ.get("IA_AGENT_CONFIG_FROM_MAIN") == "1":
+    if os.environ.get("LOCAL_IA_CONFIG_FROM_MAIN") == "1":
         raise SystemExit
 
     print("\nRetour vers main.py...")
@@ -594,12 +653,13 @@ def menu():
                 ("3", "Règles"),
                 ("4", "Instructions personnalisées"),
                 ("5", "Ollama"),
-                ("6", "Conversation"),
-                ("7", "Mémoire"),
-                ("8", "Recherche"),
-                ("9", "Afficher la configuration"),
-                ("10", "Réinitialiser la configuration"),
-                ("11", "Sauvegarder"),
+                ("6", "OpenRouter"),
+                ("7", "Conversation"),
+                ("8", "Mémoire"),
+                ("9", "Recherche"),
+                ("10", "Afficher la configuration"),
+                ("11", "Réinitialiser la configuration"),
+                ("12", "Sauvegarder"),
                 ("0", "Retour vers main.py"),
             ],
             footer="Votre choix : ",
@@ -628,25 +688,29 @@ def menu():
             sauvegarder_config(config)
 
         elif choix == "6":
-            modifier_conversation(config)
+            modifier_openrouter(config)
             sauvegarder_config(config)
 
         elif choix == "7":
-            modifier_memoire(config)
+            modifier_conversation(config)
             sauvegarder_config(config)
 
         elif choix == "8":
-            modifier_recherche(config)
+            modifier_memoire(config)
             sauvegarder_config(config)
 
         elif choix == "9":
+            modifier_recherche(config)
+            sauvegarder_config(config)
+
+        elif choix == "10":
             afficher_resume(config)
             pause()
 
-        elif choix == "10":
+        elif choix == "11":
             reinitialiser(config)
 
-        elif choix == "11":
+        elif choix == "12":
             sauvegarder_config(config)
             print("\n✓ Configuration sauvegardée.")
 

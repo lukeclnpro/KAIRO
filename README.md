@@ -100,6 +100,21 @@ python server.py
 
 > Selon votre configuration réseau et votre pare-feu, il peut être nécessaire d'autoriser le port utilisé par le serveur.
 
+## 🧪 Tests
+
+Chaque test peut être exécuté seul :
+
+```bash
+python3 tests/test_files.py
+python3 tests/test_commands.py
+```
+
+Pour lancer toute la suite :
+
+```bash
+for test_file in tests/test_*.py; do python3 "$test_file" || exit 1; done
+```
+
 ## 🔄 Mises à jour
 
 Les informations de version et le journal des changements sont centralisés dans :
@@ -199,7 +214,12 @@ python main.py force_update
 local_ia/
 ├── main.py                 # Programme principal
 ├── server.py               # Serveur web local
-├── ia_agent.py             # Agent IA
+├── local_ia/               # Package de l'agent IA
+│   ├── core/               # Agent, contexte, mémoire, conversations
+│   ├── llm/                # Client Ollama
+│   ├── tools/              # Outils utilisés par l'agent
+│   ├── web/                # Serveur et API web
+│   └── cli/                # Interface terminal
 ├── ui.py                   # Interface terminal
 ├── setup.py                # Installation
 ├── uninstall.py            # Désinstallation
@@ -236,3 +256,94 @@ Voir les fichiers du dépôt pour les informations de licence.
 <p align="center">
   <sub>Local IA — exécution locale, vos modèles restent sur votre machine.</sub>
 </p>
+
+## 📁 Commandes `/fichier`
+
+Le chat peut maintenant lire et créer/modifier des fichiers directement avec des commandes.
+
+### Lire un fichier
+
+Syntaxe exacte :
+
+```text
+/fichier-"extension"-"chemin"
+```
+
+Exemple :
+
+```text
+/fichier-"py"-"/chemin/vers/main.py"
+```
+
+Le contenu du fichier est chargé dans le contexte de l'IA sans être recopié dans l'affichage de la conversation.
+
+Une syntaxe simplifiée est également disponible :
+
+```text
+/fichier "/chemin/vers/main.py"
+```
+
+### Créer un fichier
+
+```text
+/fichier-create-"md"-"./README_test.md"
+# Mon fichier
+
+Contenu généré ou fourni après la commande.
+```
+
+ou :
+
+```text
+/fichier create "./README_test.md"
+# Mon fichier
+```
+
+### Modifier un fichier
+
+```text
+/fichier-edit-"txt"-"./notes.txt"
+Nouveau contenu du fichier.
+```
+
+Par sécurité, le serveur limite par défaut les accès au dossier de Local IA. Des dossiers supplémentaires peuvent être autorisés avec `file_access_roots` dans `config.json` :
+
+```json
+{
+  "file_access_roots": [
+    ".",
+    "~/Documents/mes-projets"
+  ]
+}
+```
+
+La taille maximale par défaut est de 2 Mo pour les fichiers texte et les écritures. Les archives ZIP sont lues sous forme de liste de contenu.
+
+## ▶️ Exécuter un programme
+
+Le chat peut lancer un programme local avec la commande suivante :
+
+```text
+/executer "./main.py" --help
+```
+
+Les arguments peuvent être placés entre guillemets. Les fichiers Python sont lancés avec l'interpréteur Python courant; les autres programmes doivent être exécutables par le système. Le programme et son répertoire de travail doivent se trouver dans une racine autorisée par `file_access_roots`.
+
+Pour éviter les blocages, chaque exécution est limitée à 30 secondes et la sortie à 64 Ko. La commande `/execute` est également acceptée.
+
+### Commandes système demandées à l'IA
+
+L'IA peut demander l'exécution d'une commande selon le contexte lorsqu'un utilisateur le demande clairement. Une commande explicite comme « lance Firefox » ou `/commande "firefox"` est autorisée pour cette requête. Pour autoriser aussi les commandes contextuelles sans demande explicite, activez volontairement cette option dans `config.json` :
+
+```json
+{
+  "command_execution": {
+    "enabled": true,
+    "timeout": 30
+  }
+}
+```
+
+Les commandes sont transmises sous forme d'arguments séparés et ne passent jamais par un shell : les pipes, redirections et enchaînements shell ne sont pas interprétés. Si l'IA propose une commande sans demande explicite, elle demande d'abord une confirmation; répondre « oui » exécute uniquement cette commande. La désactivation par défaut est recommandée lorsque le serveur est accessible sur le réseau.
+
+Pour une application, l'IA recherche un nom exact dans les applications installées puis la lance. Elle ne lance pas une application dont le nom est seulement ressemblant. Sous Linux, les fichiers `.desktop` sont recherchés dans les dossiers d'applications utilisateur et système; « Word » peut utiliser LibreOffice comme alternative lorsqu'il est installé.

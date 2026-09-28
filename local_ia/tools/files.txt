@@ -1,0 +1,12 @@
+OUTIL : files.py
+
+ROLE
+Façade de compatibilité vers file_commands.py.
+
+UTILISATION
+Ce module expose les opérations détaillées de lecture et d'écriture de fichiers
+du projet : read_file, write_file, parse_command et execute_command.
+
+REGLES
+Respecter les racines autorisées, les limites de taille et les extensions de
+fichiers prises en charge. Pour l'agent, préférer file.py ou write.py.

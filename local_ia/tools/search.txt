@@ -1,0 +1,17 @@
+OUTIL : search.py
+
+ROLE
+Cherche un texte (ou une expression régulière) dans les fichiers texte d'un
+dossier autorisé. Utile pour retrouver où se trouve un bug ou une fonction.
+
+PARAMETRES
+pattern : texte ou expression régulière, sans tenir compte de la casse.
+path : dossier ou fichier où chercher (« . » par défaut).
+extension : filtre facultatif, par exemple py.
+
+EXEMPLE
+<tool_call>{"tool":"search","arguments":{"pattern":"def launch","path":".","extension":"py"}}</tool_call>
+
+REGLES
+Les dossiers .git, __pycache__, node_modules et les environnements virtuels
+sont ignorés. 30 résultats maximum par défaut.

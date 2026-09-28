@@ -1,0 +1,18 @@
+OUTIL : command.py
+
+ROLE
+Exécute une commande précise, sans shell ni pipe. Sert à lancer un script ou
+les tests pour vérifier qu'un bug est corrigé.
+
+PARAMETRES
+argv : liste [programme, argument, ...] (une chaîne "python app.py" est aussi acceptée).
+cwd : dossier de travail (dossiers autorisés seulement). Par défaut : dossier personnel.
+timeout : durée maximale en secondes (120 maximum).
+
+EXEMPLE
+<tool_call>{"tool":"command","arguments":{"argv":["python3","app.py"],"cwd":"/chemin/projet"}}</tool_call>
+
+REGLES
+Les commandes risquées (rm, sudo, kill, chmod, dd, shutdown, shells...) ne
+s'exécutent qu'après confirmation : l'IA demande, l'utilisateur répond « oui ».
+Toute autre réponse annule la confirmation en attente.

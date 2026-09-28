@@ -19,7 +19,7 @@
         "respecter_role": true,
         "utiliser_historique": true,
         "utiliser_memoire": true,
-        "ne_pas_inventer": true,
+        "ne_pas_inventer": false,
         "signaler_incertitude": true,
         "eviter_repetitions": true,
         "code_directement_utilisable": true,
@@ -31,6 +31,18 @@
         "model": "",
         "timeout": 120,
         "stream": false
+    },
+    "openrouter": {
+        "api_key": "",
+        "model": "openai/gpt-4o-mini",
+        "base_url": "https://openrouter.ai/api/v1",
+        "timeout": 120,
+        "site_url": "",
+        "app_name": "Local IA"
+    },
+    "command_execution": {
+        "enabled": false,
+        "timeout": 30
     },
     "conversation": {
         "max_history": 20,

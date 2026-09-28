@@ -6,8 +6,21 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import re
+
+from local_ia.tools import applications as application_launcher
+from local_ia.tools import commands as command_commands
+from local_ia.tools import files as file_commands
+from local_ia.tools import programs as program_commands
+from local_ia.core import conversation as conversation_store
+from local_ia.core.context import build_system_prompt, load_context
+from local_ia.core.memory import get_memories, init_database
+from local_ia.core.agent import LocalAgent
+from local_ia.llm.ollama import ask_ollama as modular_ask_ollama
 import socket
 import sys
+import threading
+import tempfile
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -18,6 +31,9 @@ BASE_DIR = Path(__file__).resolve().parent
 WEB_DIR = BASE_DIR / "web"
 CONFIG_PATH = BASE_DIR / "config.json"
 CHAT_DIR = BASE_DIR / "chats"
+CHAT_LOCK = threading.RLock()
+CHAT_AGENTS = {}
+CHAT_AGENTS_LOCK = threading.RLock()
 OLLAMA_DEFAULT = "http://127.0.0.1:11434"
 
 
@@ -30,7 +46,57 @@ def read_json(path: Path, default):
 
 def config():
     data = read_json(CONFIG_PATH, {})
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        data = {}
+    roots = data.get("file_access_roots", [str(BASE_DIR)])
+    if isinstance(roots, str):
+        roots = [roots]
+    file_commands.set_access_roots(roots)
+    return data
+
+
+def command_execution_config():
+    value = config().get("command_execution", {})
+    return value if isinstance(value, dict) else {}
+
+
+def explicit_command_request(message):
+    text = str(message or "").strip().lower()
+    if text.startswith(("/commande", "/command", "/execute", "/executer")):
+        return True
+    return any(
+        phrase in text
+        for phrase in (
+            "lance ", "ouvre ", "exécute ", "execute ", "démarre ", "demarre ",
+            "baisse le volume", "monte le volume", "augmente le volume",
+            "coupe le son", "remets le son",
+        )
+    )
+
+
+def authorization_response(message):
+    text = str(message or "").strip().lower()
+    return text in {
+        "oui", "yes", "ok", "d'accord", "d accord", "j'autorise",
+        "j autorise", "autorise", "je confirme", "confirme", "lance",
+    }
+
+
+def extract_permission_request(content):
+    match = re.search(r"<permission_request>\s*(\{.*?\})\s*</permission_request>", content or "", re.S)
+    if not match:
+        return None
+    try:
+        payload = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return None
+    tool = payload.get("tool", "execute_command")
+    if tool == "launch_application" and isinstance(payload.get("name"), str):
+        return {"tool": tool, "name": payload["name"], "reason": str(payload.get("reason", ""))}
+    argv = payload.get("argv")
+    if tool == "execute_command" and isinstance(argv, list) and argv and all(isinstance(x, str) for x in argv):
+        return {"tool": tool, "argv": argv, "reason": str(payload.get("reason", ""))}
+    return None
 
 
 def ollama_url():
@@ -40,7 +106,7 @@ def ollama_url():
     else:
         url = OLLAMA_DEFAULT
     url = str(url).rstrip("/")
-    # ia_agent utilise /api/chat ; l'utilisateur peut fournir localhost:11434.
+    # Le client Ollama utilise /api/chat ; l'utilisateur peut fournir localhost:11434.
     if url.endswith("/api"):
         url = url[:-4]
     return url
@@ -74,20 +140,15 @@ def installed_models():
         return {"error": str(exc), "models": []}
 
 
+def _sync_chat_store():
+    global CHAT_DIR
+    conversation_store.CHAT_DIR = CHAT_DIR
+    return conversation_store
+
+
 def chats():
-    CHAT_DIR.mkdir(parents=True, exist_ok=True)
-    result = []
-    for p in CHAT_DIR.glob("*.json"):
-        if not p.stem.isdigit():
-            continue
-        data = read_json(p, {})
-        if isinstance(data, dict):
-            data.setdefault("id", int(p.stem))
-            data.setdefault("messages", [])
-            data.setdefault("summary", "")
-            data.setdefault("topic", "")
-            result.append(data)
-    return sorted(result, key=lambda x: int(x.get("id", 0)), reverse=True)
+    _sync_chat_store()
+    return conversation_store.list_chats()
 
 
 def get_chat(chat_id):
@@ -95,32 +156,26 @@ def get_chat(chat_id):
         cid = int(chat_id)
     except (TypeError, ValueError):
         return None
-    p = CHAT_DIR / f"{cid}.json"
-    data = read_json(p, None)
-    return data if isinstance(data, dict) else None
+    with CHAT_LOCK:
+        with CHAT_AGENTS_LOCK:
+            session = CHAT_AGENTS.get(str(cid))
+            if session:
+                return session["chat"]
+        _sync_chat_store()
+        return conversation_store.load_chat(cid)
 
 
 def save_chat(chat):
-    CHAT_DIR.mkdir(parents=True, exist_ok=True)
-    chat["updated_at"] = datetime.now().isoformat(timespec="seconds")
-    (CHAT_DIR / f"{int(chat['id'])}.json").write_text(
-        json.dumps(chat, ensure_ascii=False, indent=4), encoding="utf-8"
-    )
+    """Sauvegarde une conversation via la couche centrale de conversation."""
+    _sync_chat_store()
+    with CHAT_LOCK:
+        conversation_store.save_chat(chat, async_mode=False)
 
 
 def create_chat():
-    ids = [int(p.stem) for p in CHAT_DIR.glob("*.json") if p.stem.isdigit()]
-    now = datetime.now().isoformat(timespec="seconds")
-    chat = {
-        "id": max(ids, default=0) + 1,
-        "created_at": now,
-        "updated_at": now,
-        "summary": "",
-        "topic": "",
-        "messages": [],
-    }
-    save_chat(chat)
-    return chat
+    _sync_chat_store()
+    with CHAT_LOCK:
+        return conversation_store.create_chat()
 
 
 def model_from_config():
@@ -129,6 +184,43 @@ def model_from_config():
     if isinstance(c.get("ollama"), dict) and c["ollama"].get("model"):
         return str(c["ollama"]["model"])
     return str(c.get("model", ""))
+
+
+def chat_agent(chat, model=None):
+    chat_id = str(chat["id"])
+    selected_model = str(model or model_from_config()).strip()
+    with CHAT_AGENTS_LOCK:
+        session = CHAT_AGENTS.get(chat_id)
+        if session and session["agent"].model != selected_model:
+            with session["lock"]:
+                session["agent"].close()
+            session = None
+        if session is None:
+            agent = LocalAgent(model=selected_model)
+            agent.prepare_chat(chat)
+            session = {"agent": agent, "chat": chat, "lock": threading.RLock()}
+            CHAT_AGENTS[chat_id] = session
+        else:
+            session["chat"] = chat
+            session["agent"].prepare_chat(chat)
+    return session
+
+
+def close_chat_agents():
+    with CHAT_AGENTS_LOCK:
+        sessions = list(CHAT_AGENTS.values())
+        CHAT_AGENTS.clear()
+    for session in sessions:
+        with session["lock"]:
+            session["agent"].close()
+
+
+def close_chat_agent(chat_id):
+    with CHAT_AGENTS_LOCK:
+        session = CHAT_AGENTS.pop(str(chat_id), None)
+    if session:
+        with session["lock"]:
+            session["agent"].close()
 
 
 def ask_ollama(model, messages):
@@ -150,54 +242,58 @@ def ask_ollama(model, messages):
     return result.get("message", {}).get("content", "").strip()
 
 
-def chat_with_model(model, chat):
-    history = []
-    for msg in chat.get("messages", [])[-20:]:
-        role = msg.get("role")
-        content = msg.get("content", "")
-        if role in ("user", "assistant") and content:
-            history.append({"role": role, "content": content})
-    # Le système est volontairement construit simplement ici : la configuration
-    # détaillée reste gérée par l'interface CLI et ia_agent.
-    system = (
-        "Tu es un assistant IA local. Réponds en français sauf si l'utilisateur "
-        "demande une autre langue. Sois clair, utile et honnête."
-    )
+def extract_command_tool(content):
+    tool = extract_tool_call(content)
+    if tool and tool.get("name") == "execute_command":
+        return tool["arguments"].get("argv")
+    return None
+
+
+def extract_tool_call(content):
+    match = re.search(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", content or "", re.S)
+    if not match:
+        return None
     try:
-        import ia_agent
-        context = ia_agent.load_context()
-        memories = []
-        try:
-            conn = ia_agent.init_database()
-            memories = ia_agent.get_memories(conn)
-            conn.close()
-        except Exception:
-            pass
-        system = ia_agent.build_system_prompt(
-            memories=memories,
-            topic=chat.get("topic"),
-            context=context,
-            external_info=None,
-        )
-    except Exception:
-        pass
-    # Le serveur web utilise directement le moteur local_ia (ia_agent.py).
-    # main.py n'intervient donc pas dans les requêtes de chat.
+        payload = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return None
+    if payload.get("name") not in ("execute_command", "launch_application"):
+        return None
+    arguments = payload.get("arguments", {})
+    if not isinstance(arguments, dict):
+        return None
+    if payload["name"] == "execute_command":
+        argv = arguments.get("argv")
+        if not isinstance(argv, list) or not argv or not all(isinstance(x, str) for x in argv):
+            return None
+    elif not isinstance(arguments.get("name"), str) or not arguments["name"].strip():
+        return None
+    return {"name": payload["name"], "arguments": arguments}
+
+
+def chat_with_model(model, chat, file_context=None, execution_context=None, allow_command_tool=False, session=None):
+    messages = chat.get("messages", [])
+    current_message = messages[-1].get("content", "") if messages else ""
+    history_chat = dict(chat)
+    history_chat["messages"] = messages[:-1] if messages else []
+    extra_context = "".join(part for part in (file_context, execution_context) if part)
+    if extra_context:
+        current_message += "\n\n" + extra_context
+
+    allowed_tools = {"memory", "context", "file", "write", "edit", "list", "search"}
+    if allow_command_tool:
+        allowed_tools.update({"launch", "command", "system"})
+
+    owns_agent = session is None
+    agent = LocalAgent(model=model) if owns_agent else session["agent"]
     try:
-        import ia_agent
-        timeout = 120
-        try:
-            timeout = int(config().get("ollama", {}).get("timeout", 120))
-        except Exception:
-            pass
-        return ia_agent.ask_ollama(
-            [{"role": "system", "content": system}] + history,
-            model=model,
-            timeout=timeout,
-        )
-    except Exception:
-        # Secours direct vers Ollama si le module local_ia n'est pas importable.
-        return ask_ollama(model, [{"role": "system", "content": system}] + history)
+        if session is None:
+            return agent.respond(history_chat, current_message, allowed_tools=allowed_tools)
+        with session["lock"]:
+            return agent.respond(history_chat, current_message, allowed_tools=allowed_tools)
+    finally:
+        if owns_agent:
+            agent.close()
 
 
 def json_out(handler, data, status=200):
@@ -261,7 +357,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/chats":
             return json_out(self, {"chats": chats()})
         if path.startswith("/api/chats/"):
-            return json_out(self, {"chat": get_chat(path.rsplit("/", 1)[-1])})
+            chat = get_chat(path.rsplit("/", 1)[-1])
+            if chat:
+                chat_agent(chat)
+            return json_out(self, {"chat": chat})
         if path == "/api/config-info":
             c = config()
             return json_out(self, {
@@ -280,7 +379,13 @@ class Handler(BaseHTTPRequestHandler):
             return json_out(self, {"error": "JSON invalide."}, 400)
 
         if path == "/api/chats/new":
-            return json_out(self, {"chat": create_chat()})
+            chat = create_chat()
+            chat_agent(chat)
+            return json_out(self, {"chat": chat})
+
+        if path.startswith("/api/chats/") and path.endswith("/close"):
+            close_chat_agent(path.split("/")[-2])
+            return json_out(self, {"ok": True})
 
         if path == "/api/chat":
             message = str(body.get("message", "")).strip()
@@ -289,6 +394,102 @@ class Handler(BaseHTTPRequestHandler):
             chat = get_chat(body.get("chat_id"))
             if chat is None:
                 return json_out(self, {"error": "Conversation introuvable."}, 404)
+            command_config = command_execution_config()
+
+            pending = chat.get("pending_command")
+            if pending and authorization_response(message):
+                try:
+                    if pending.get("tool") == "launch_application":
+                        application = application_launcher.launch_application(pending["name"])
+                        command_result = {
+                            "returncode": 0,
+                            "command": application["argv"],
+                            "stdout": "Application lancée.",
+                            "stderr": "",
+                        }
+                    else:
+                        command_result = command_commands.execute_argv(
+                            pending["argv"],
+                            timeout=command_config.get("timeout", command_commands.DEFAULT_TIMEOUT),
+                        )
+                except Exception as exc:
+                    return json_out(self, {"error": f"Commande : {exc}"}, 400)
+                chat.pop("pending_command", None)
+                output = command_result["stdout"]
+                if command_result["stderr"]:
+                    output += ("\n" if output else "") + command_result["stderr"]
+                answer = (
+                    f"Commande autorisée et terminée avec le code {command_result['returncode']} : "
+                    f"`{' '.join(command_result['command'])}`\n\n"
+                    f"{output or '(aucune sortie)'}"
+                )
+                chat.setdefault("messages", []).extend([
+                    {"role": "user", "content": message},
+                    {"role": "assistant", "content": answer},
+                ])
+                save_chat(chat)
+                return json_out(self, {
+                    "ok": command_result["returncode"] == 0,
+                    "answer": answer,
+                    "chat": chat,
+                    "command": command_result,
+                })
+
+            # Les programmes sont exécutés localement, sans shell, avant Ollama.
+            try:
+                program_result = program_commands.execute_command(message)
+            except Exception as exc:
+                return json_out(self, {"error": f"Exécution : {exc}"}, 400)
+            if program_result:
+                result = program_result["result"]
+                output = result["stdout"]
+                if result["stderr"]:
+                    output += ("\n" if output else "") + result["stderr"]
+                answer = (
+                    f"Programme terminé avec le code {result['returncode']} : "
+                    f"`{result['path']}`\n\n{output or '(aucune sortie)'}"
+                )
+                chat.setdefault("messages", []).extend([
+                    {"role": "user", "content": message},
+                    {"role": "assistant", "content": answer},
+                ])
+                save_chat(chat)
+                return json_out(self, {
+                    "ok": result["returncode"] == 0,
+                    "answer": answer,
+                    "chat": chat,
+                    "program": result,
+                })
+
+            command_parts = command_commands.parse_command(message)
+            try:
+                command_result = command_commands.execute_command(
+                    message,
+                    timeout=command_config.get("timeout", command_commands.DEFAULT_TIMEOUT),
+                )
+            except Exception as exc:
+                return json_out(self, {"error": f"Commande : {exc}"}, 400)
+            if command_result:
+                output = command_result["stdout"]
+                if command_result["stderr"]:
+                    output += ("\n" if output else "") + command_result["stderr"]
+                answer = (
+                    f"Commande terminée avec le code {command_result['returncode']} : "
+                    f"`{' '.join(command_result['command'])}`\n\n"
+                    f"{output or '(aucune sortie)'}"
+                )
+                chat.setdefault("messages", []).extend([
+                    {"role": "user", "content": message},
+                    {"role": "assistant", "content": answer},
+                ])
+                save_chat(chat)
+                return json_out(self, {
+                    "ok": command_result["returncode"] == 0,
+                    "answer": answer,
+                    "chat": chat,
+                    "command": command_result,
+                })
+
             model = str(body.get("model") or model_from_config()).strip()
             models = installed_models()
             if models.get("error"):
@@ -296,15 +497,98 @@ class Handler(BaseHTTPRequestHandler):
             if not any(x["name"] == model for x in models["models"]):
                 return json_out(self, {"error": f"Le modèle '{model}' n'est pas installé."}, 400)
 
-            chat.setdefault("messages", []).append({"role": "user", "content": message})
+            # Commande /fichier : lecture ou création locale avant l'appel au modèle.
             try:
-                answer = chat_with_model(model, chat)
+                file_result = file_commands.execute_command(message)
+            except Exception as exc:
+                return json_out(self, {"error": f"Commande /fichier : {exc}"}, 400)
+
+            chat.setdefault("messages", []).append({"role": "user", "content": message})
+
+            # Une commande de création/modification est exécutée immédiatement.
+            # L'IA n'est pas appelée inutilement : elle confirme simplement l'opération.
+            if file_result and file_result["command"]["action"] in ("create", "edit"):
+                data = file_result["result"]
+                verb = "créé" if file_result["command"]["action"] == "create" else "modifié"
+                answer = f"Fichier {verb} : `{data['path']}` ({data['size']} octets)."
+                chat["messages"].append({"role": "assistant", "content": answer})
+                save_chat(chat)
+                return json_out(self, {"ok": True, "answer": answer, "chat": chat, "file": data})
+
+            # Pour une lecture, le contenu est injecté dans le contexte du modèle
+            # sans gonfler l'affichage de la conversation.
+            file_context = file_commands.prompt_block(file_result) if file_result else None
+            allow_command_tool = bool(
+                command_config.get("enabled", False) or explicit_command_request(message)
+            )
+            session = chat_agent(chat, model)
+            try:
+                answer = chat_with_model(
+                    model,
+                    chat,
+                    file_context=file_context,
+                    allow_command_tool=allow_command_tool,
+                    session=session,
+                )
+                tool_call = extract_tool_call(answer) if allow_command_tool else None
+                if tool_call and tool_call["name"] == "launch_application":
+                    application_name = tool_call["arguments"]["name"]
+                    application = application_launcher.launch_application(application_name)
+                    execution_context = (
+                        f"Résultat de l'outil launch_application : l'application "
+                        f"{application_name} a été lancée."
+                    )
+                    answer = chat_with_model(
+                        model,
+                        chat,
+                        file_context=file_context,
+                        execution_context=execution_context,
+                        allow_command_tool=False,
+                        session=session,
+                    )
+                elif tool_call and tool_call["name"] == "execute_command":
+                    tool_argv = tool_call["arguments"]["argv"]
+                    tool_result = command_commands.execute_argv(
+                        tool_argv,
+                        timeout=command_config.get("timeout", command_commands.DEFAULT_TIMEOUT),
+                    )
+                    tool_output = tool_result["stdout"]
+                    if tool_result["stderr"]:
+                        tool_output += ("\n" if tool_output else "") + tool_result["stderr"]
+                    execution_context = (
+                        "Résultat de l'outil execute_command (ne relance pas une commande):\n"
+                        f"code retour: {tool_result['returncode']}\n"
+                        f"sortie:\n{tool_output or '(aucune sortie)'}"
+                    )
+                    answer = chat_with_model(
+                        model,
+                        chat,
+                        file_context=file_context,
+                        execution_context=execution_context,
+                        allow_command_tool=False,
+                        session=session,
+                    )
+                else:
+                    permission = extract_permission_request(answer)
+                    if permission:
+                        chat["pending_command"] = permission
+                        answer = re.sub(
+                            r"\s*<permission_request>.*?</permission_request>",
+                            "",
+                            answer,
+                            flags=re.S,
+                        ).strip()
+                        if permission["tool"] == "launch_application":
+                            description = f"ouvrir {permission['name']}"
+                        else:
+                            description = f"exécuter `{' '.join(permission['argv'])}`"
+                        answer += f"\n\nAutorisation requise pour {description}. Répondez « oui » pour confirmer."
             except Exception as exc:
                 chat["messages"].pop()
                 return json_out(self, {"error": f"Erreur Ollama : {exc}"}, 502)
             chat["messages"].append({"role": "assistant", "content": answer})
             save_chat(chat)
-            return json_out(self, {"ok": True, "answer": answer, "chat": chat})
+            return json_out(self, {"ok": True, "answer": answer, "chat": chat, "file": file_result["result"] if file_result else None})
         self.send_error(404)
 
 
@@ -342,6 +626,7 @@ def run_server(port=8080):
         httpd.serve_forever()
     finally:
         httpd.server_close()
+        close_chat_agents()
 
 
 if __name__ == "__main__":

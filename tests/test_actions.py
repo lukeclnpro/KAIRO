@@ -1,0 +1,382 @@
+#!/usr/bin/env python3
+"""Tests des actions sur le PC : voie rapide, boucle d'outils, edit/list/search."""
+
+from __future__ import annotations
+
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+import application_launcher
+import file_commands
+from local_ia.core.agent import LocalAgent
+from local_ia.tools import command, edit, listing, search, system
+from local_ia.tools.file import normalize_path
+
+
+def tool(name, **arguments):
+    import json
+    return "<tool_call>" + json.dumps({"tool": name, "arguments": arguments}) + "</tool_call>"
+
+
+class ActionTestCase(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.tmp = Path(self.directory.name).resolve()
+        file_commands.set_access_roots([self.tmp])
+        backups = patch.object(edit, "BACKUP_DIR", self.tmp / ".backups")
+        backups.start()
+        self.addCleanup(backups.stop)
+        self.agent = LocalAgent(model="test")
+
+    def tearDown(self):
+        self.agent.close()
+        file_commands.set_access_roots([ROOT])
+        self.directory.cleanup()
+
+    def ask(self, *answers):
+        iterator = iter(answers)
+        return patch("local_ia.core.agent.ask_ollama", side_effect=lambda *a, **k: next(iterator))
+
+
+class FastPathTest(ActionTestCase):
+    def test_launch_without_calling_the_model(self):
+        app = {"name": "Firefox", "argv": ["firefox"]}
+        with patch.object(application_launcher, "find_application", return_value=app), \
+             patch.object(application_launcher, "launch_application", return_value=app) as launch, \
+             patch("local_ia.core.agent.ask_ollama") as ask:
+            answer = self.agent.respond({"messages": []}, "ouvre firefox")
+        self.assertEqual(answer, "Firefox lancé.")
+        launch.assert_called_once_with("firefox")
+        ask.assert_not_called()
+
+    def test_unknown_application_falls_back_to_the_model(self):
+        with patch.object(application_launcher, "find_application", return_value=None), \
+             self.ask("Je ne trouve pas cette application.") as ask:
+            answer = self.agent.respond({"messages": []}, "ouvre zzzzapp")
+        self.assertEqual(answer, "Je ne trouve pas cette application.")
+        self.assertEqual(ask.call_count, 1)
+
+    def test_files_and_paths_are_not_treated_as_applications(self):
+        with patch.object(application_launcher, "find_application") as find:
+            self.assertIsNone(self.agent.fast_path("ouvre le fichier notes.txt"))
+            self.assertIsNone(self.agent.fast_path("lance /usr/bin/python3"))
+        find.assert_not_called()
+
+    def test_respects_allowed_tools(self):
+        with patch.object(application_launcher, "find_application") as find:
+            self.assertIsNone(self.agent.fast_path("ouvre firefox", allowed_tools={"file"}))
+        find.assert_not_called()
+
+    def test_volume(self):
+        with patch.object(system, "use", return_value={"returncode": 0}) as use:
+            self.assertEqual(self.agent.fast_path("baisse le volume de 20"), "Volume baissé.")
+            self.assertEqual(self.agent.fast_path("coupe le son"), "Son coupé.")
+        self.assertEqual(use.call_args_list[0].args, ("down", None, 20))
+        self.assertIsNone(self.agent.fast_path("écris un poème sur le son de la mer"))
+
+    def test_system_info_is_answered_without_ollama(self):
+        info = {"system": "Linux", "release": "6.1", "machine": "x86_64"}
+        with patch.object(system, "use", return_value=info) as use, \
+             patch("local_ia.core.agent.ask_ollama") as ask:
+            answer = self.agent.respond({"messages": []}, "Quel système d'exploitation j'utilise ?")
+        self.assertEqual(answer, "Système : Linux 6.1 (x86_64)")
+        use.assert_called_once_with("info")
+        ask.assert_not_called()
+        self.assertEqual(self.agent.last_route["mode"], "direct")
+        self.assertEqual(self.agent.last_route["action"], "fast_path")
+
+    def test_system_info_fast_path_respects_tool_permissions(self):
+        with patch.object(system, "use") as use:
+            answer = self.agent.fast_path("Quel système d'exploitation j'utilise ?", allowed_tools={"file"})
+        self.assertIsNone(answer)
+        use.assert_not_called()
+
+
+class ToolLoopTest(ActionTestCase):
+    def test_system_prompt_is_prepared_once_per_chat(self):
+        chat = {"id": 42, "topic": "tests", "messages": []}
+        with patch("local_ia.core.context_compiler.build_system_prompt", return_value="prompt") as build_prompt:
+            first = self.agent.build_messages(chat, "premier message")
+            second = self.agent.build_messages(chat, "deuxième message")
+        self.assertEqual(build_prompt.call_count, 1)
+        self.assertEqual(first[0]["content"], second[0]["content"])
+
+    def test_simple_question_does_not_send_tool_definitions(self):
+        with self.ask("Rome.") as ask:
+            self.agent.respond({"messages": []}, "Quelle est la capitale de l'Italie ?")
+        system_prompt = ask.call_args.args[0][0]["content"]
+        self.assertNotIn("file :", system_prompt)
+        self.assertNotIn("command :", system_prompt)
+        self.assertNotIn("system :", system_prompt)
+
+    def test_code_request_gets_filesystem_tools_without_system_tools(self):
+        allowed = {"file", "write", "edit", "list", "search", "command"}
+        with self.ask("Je vais lire le fichier.") as ask:
+            self.agent.respond({"messages": []}, "Corrige le bug dans app.py", allowed_tools=allowed)
+        system_prompt = ask.call_args.args[0][0]["content"]
+        self.assertIn("file :", system_prompt)
+        self.assertIn("search :", system_prompt)
+        self.assertIn("command :", system_prompt)
+        self.assertNotIn("launch :", system_prompt)
+        self.assertNotIn("system :", system_prompt)
+
+    def test_server_allowlist_removes_disallowed_tools_from_prompt(self):
+        allowed = {"file", "search", "edit"}
+        with self.ask("Je vais examiner le fichier.") as ask:
+            self.agent.respond({"messages": []}, "Corrige le bug dans app.py", allowed_tools=allowed)
+        system_prompt = ask.call_args.args[0][0]["content"]
+        self.assertIn("edit :", system_prompt)
+        self.assertNotIn("command :", system_prompt)
+        self.assertNotIn("system :", system_prompt)
+
+    def test_simple_action_costs_a_single_model_call(self):
+        target = str(self.tmp / "note.txt")
+        with self.ask(tool("write", path=target, content="salut")) as ask:
+            answer = self.agent.respond({"messages": []}, "crée note.txt avec salut")
+        self.assertEqual(ask.call_count, 1)
+        self.assertIn("note.txt", answer)
+        self.assertEqual(Path(target).read_text(), "salut")
+
+    def test_chained_request_still_asks_the_model_after_the_tool(self):
+        target = str(self.tmp / "note.txt")
+        with self.ask(tool("write", path=target, content="a"), "Fichier créé, tout est prêt.") as ask:
+            answer = self.agent.respond({"messages": []}, "crée note.txt puis dis-moi quand c'est prêt")
+        self.assertEqual(ask.call_count, 2)
+        self.assertEqual(answer, "Fichier créé, tout est prêt.")
+
+    def test_fixes_a_bug_read_edit_run(self):
+        script = self.tmp / "app.py"
+        script.write_text("print(valeur)\n", encoding="utf-8")
+        answers = (
+            tool("file", path=str(script)),
+            tool("edit", path=str(script), old="print(valeur)", new="print('ok')"),
+            tool("command", argv=[sys.executable, str(script)], cwd=str(self.tmp)),
+            "Bug corrigé : le script affiche ok.",
+        )
+        with self.ask(*answers) as ask:
+            answer = self.agent.respond({"messages": []}, "corrige le bug de app.py")
+        self.assertEqual(ask.call_count, 4)
+        self.assertEqual(answer, "Bug corrigé : le script affiche ok.")
+        self.assertEqual(script.read_text(), "print('ok')\n")
+        last_tool_message = ask.call_args.args[0][-1]
+        self.assertEqual(last_tool_message["role"], "tool")
+        self.assertIn('"stdout":"ok', last_tool_message["content"])
+
+    def test_tool_error_is_given_back_to_the_model(self):
+        script = self.tmp / "a.py"
+        script.write_text("x = 1\n", encoding="utf-8")
+        with self.ask(tool("edit", path=str(script), old="absent", new="y"), "Je relis le fichier.") as ask:
+            answer = self.agent.respond({"messages": []}, "corrige a.py")
+        self.assertEqual(answer, "Je relis le fichier.")
+        self.assertIn("introuvable", ask.call_args.args[0][-1]["content"])
+
+    def test_model_repeating_itself_is_stopped(self):
+        call = tool("list", path=str(self.tmp))
+        with self.ask(call, call, call, call) as ask:
+            answer = self.agent.respond({"messages": []}, "liste le dossier")
+        self.assertEqual(answer, "Action list exécutée.")
+        self.assertEqual(ask.call_count, 2)
+
+    def test_missing_argument_gives_a_readable_error(self):
+        with self.assertRaisesRegex(ValueError, "old"):
+            self.agent.execute_tool({"tool": "edit", "arguments": {"path": "x", "new": "y"}}, {})
+
+    def test_large_results_are_truncated_for_the_model(self):
+        big = self.tmp / "big.txt"
+        big.write_text("a" * 50000, encoding="utf-8")
+        with self.ask(tool("file", path=str(big)), "Fichier lu.") as ask:
+            self.agent.respond({"messages": []}, "lis big.txt")
+        self.assertLess(len(ask.call_args.args[0][-1]["content"]), 7000)
+
+
+class ConfirmationTest(ActionTestCase):
+    def test_risky_command_needs_confirmation_then_runs(self):
+        chat = {"messages": []}
+        with self.ask(tool("command", argv=["rm", "-rf", str(self.tmp / "x")])) as ask:
+            answer = self.agent.respond(chat, "supprime le dossier x")
+        self.assertIn("Confirmation nécessaire", answer)
+        self.assertEqual(ask.call_count, 1)
+        self.assertIn("pending_tool", chat)
+
+        done = {"command": ["rm"], "returncode": 0, "stdout": "", "stderr": ""}
+        with patch("local_ia.tools.command.execute_argv", return_value=done) as run, \
+             self.ask("Dossier supprimé.") as ask:
+            answer = self.agent.respond(chat, "oui")
+        run.assert_called_once()
+        self.assertEqual(answer, "Dossier supprimé.")
+        self.assertNotIn("pending_tool", chat)
+
+    def test_harmless_command_needs_no_confirmation(self):
+        self.assertFalse(command.is_risky(["python3", "x.py"]))
+
+    def test_dangerous_commands_stay_risky_through_wrappers(self):
+        wrapped_commands = (
+            ["nice", "-n", "10", "rm", "-rf", "/tmp/data"],
+            ["time", "-o", "/tmp/time.log", "rm", "-rf", "/tmp/data"],
+            ["xargs", "-I", "{}", "rm", "-rf", "/tmp/data"],
+            ["env", "-S", "rm -rf /tmp/data"],
+        )
+        for argv in wrapped_commands:
+            with self.subTest(argv=argv):
+                self.assertTrue(command.is_risky(argv))
+
+        for argv in (["rm", "a"], ["/bin/rm", "a"], ["sudo", "ls"], ["mkfs.ext4", "/dev/x"], ["kill", "1"]):
+            self.assertTrue(command.is_risky(argv), argv)
+
+
+class EditToolTest(ActionTestCase):
+    def test_replaces_once_and_keeps_a_backup(self):
+        path = self.tmp / "a.py"
+        path.write_text("a = 1\nb = 2\n", encoding="utf-8")
+        result = edit.use(str(path), "b = 2", "b = 3")
+        self.assertEqual(path.read_text(), "a = 1\nb = 3\n")
+        self.assertTrue(result["syntax_ok"])
+        self.assertEqual(Path(result["backup"]).read_text(), "a = 1\nb = 2\n")
+
+    def test_rejects_ambiguous_and_missing_text(self):
+        path = self.tmp / "a.txt"
+        path.write_text("x\nx\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "2 fois"):
+            edit.use(str(path), "x", "y")
+        with self.assertRaisesRegex(ValueError, "introuvable"):
+            edit.use(str(path), "zzz", "y")
+        self.assertEqual(edit.use(str(path), "x", "y", replace_all=True)["replacements"], 2)
+
+    def test_backups_do_not_overwrite_each_other_with_same_timestamp(self):
+        path = self.tmp / "version.txt"
+        path.write_text("v0", encoding="utf-8")
+        with patch("local_ia.tools.edit.time.strftime", return_value="same-time"):
+            first = edit.use(str(path), "v0", "v1")["backup"]
+            second = edit.use(str(path), "v1", "v2")["backup"]
+        self.assertNotEqual(first, second)
+        self.assertEqual(Path(first).read_text(encoding="utf-8"), "v0")
+
+    def test_edit_is_cancelled_when_backup_fails(self):
+        path = self.tmp / "protected.txt"
+        path.write_text("before", encoding="utf-8")
+        with patch("local_ia.tools.edit.shutil.copy2", side_effect=PermissionError("backup denied")):
+            with self.assertRaises(PermissionError):
+                edit.use(str(path), "before", "after")
+        self.assertEqual(path.read_text(encoding="utf-8"), "before")
+
+    def test_refuses_to_break_valid_python(self):
+        path = self.tmp / "ok.py"
+        path.write_text("x = 1\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "syntaxe"):
+            edit.use(str(path), "x = 1", "x = (")
+        self.assertEqual(path.read_text(), "x = 1\n")
+
+    def test_can_repair_a_file_that_is_already_broken(self):
+        path = self.tmp / "broken.py"
+        path.write_text("x = (\n", encoding="utf-8")
+        self.assertTrue(edit.use(str(path), "x = (", "x = 1")["syntax_ok"])
+
+    def test_handles_windows_line_endings(self):
+        path = self.tmp / "crlf.txt"
+        path.write_bytes(b"a\r\nb\r\n")
+        edit.use(str(path), "a\nb", "a\nc")
+        self.assertEqual(path.read_bytes(), b"a\r\nc\r\n")
+
+    def test_rejects_paths_outside_allowed_roots(self):
+        with self.assertRaises(PermissionError):
+            edit.use("/etc/hostname", "a", "b")
+
+
+class ExplorationToolsTest(ActionTestCase):
+    def test_downloads_normalization_requires_a_path_component_boundary(self):
+        path = "/workspace/downloads-archive/data.txt"
+        self.assertEqual(normalize_path(path), path)
+
+    def test_list_directory(self):
+        (self.tmp / "dossier").mkdir()
+        (self.tmp / "a.txt").write_text("abc", encoding="utf-8")
+        result = listing.use(str(self.tmp))
+        self.assertEqual([e["name"] for e in result["entries"]], ["dossier", "a.txt"])
+        self.assertEqual(result["entries"][1]["size"], 3)
+
+    def test_search_finds_lines_and_skips_junk(self):
+        (self.tmp / "a.py").write_text("un\nTODO: corriger\n", encoding="utf-8")
+        (self.tmp / "__pycache__").mkdir()
+        (self.tmp / "__pycache__" / "b.py").write_text("TODO caché\n", encoding="utf-8")
+        result = search.use("todo", str(self.tmp), extension="py")
+        self.assertEqual([(Path(m["file"]).name, m["line"]) for m in result["matches"]], [("a.py", 2)])
+
+    def test_search_does_not_follow_symlinks_outside_allowed_roots(self):
+        with tempfile.TemporaryDirectory() as outside:
+            secret = Path(outside) / "secret.txt"
+            secret.write_text("private-marker", encoding="utf-8")
+            link = self.tmp / "secret.txt"
+            try:
+                link.symlink_to(secret)
+            except OSError as error:
+                self.skipTest(f"Création de lien symbolique indisponible : {error}")
+            result = search.use("private-marker", str(self.tmp))
+        self.assertEqual(result["matches"], [])
+
+    def test_search_marks_result_limit_only_when_more_matches_exist(self):
+        (self.tmp / "only.txt").write_text("needle\n", encoding="utf-8")
+        result = search.use("needle", str(self.tmp), max_results=1)
+        self.assertFalse(result["truncated"])
+
+    def test_search_marks_file_scan_limit_as_truncated(self):
+        (self.tmp / "a.txt").write_text("needle\n", encoding="utf-8")
+        (self.tmp / "b.txt").write_text("needle\n", encoding="utf-8")
+        with patch("local_ia.tools.search.MAX_FILES", 1):
+            result = search.use("absent", str(self.tmp))
+        self.assertTrue(result["truncated"])
+
+    def test_system_action_aliases(self):
+        self.assertEqual(system.normalize_action("Augmenter"), "up")
+        self.assertEqual(system.normalize_action("mute"), "mute")
+
+
+class LauncherTest(unittest.TestCase):
+    def test_hidden_desktop_entries_are_ignored(self):
+        with tempfile.TemporaryDirectory() as folder:
+            desktop = Path(folder) / "hidden.desktop"
+            desktop.write_text(
+                "[Desktop Entry]\nType=Application\nName=Hidden\nHidden=true\nExec=hidden-app\n",
+                encoding="utf-8",
+            )
+            self.assertIsNone(application_launcher._desktop_application(desktop))
+
+    def test_desktop_entries_with_missing_tryexec_are_ignored(self):
+        with tempfile.TemporaryDirectory() as folder:
+            desktop = Path(folder) / "missing.desktop"
+            desktop.write_text(
+                "[Desktop Entry]\nType=Application\nName=Missing\nTryExec=/not/installed/here\nExec=missing-app\n",
+                encoding="utf-8",
+            )
+            self.assertIsNone(application_launcher._desktop_application(desktop))
+
+    def test_malformed_desktop_without_entry_section_is_ignored(self):
+        with tempfile.TemporaryDirectory() as folder:
+            desktop = Path(folder) / "malformed.desktop"
+            desktop.write_text("[Other Section]\nName=Not an app\n", encoding="utf-8")
+            self.assertIsNone(application_launcher._desktop_application(desktop))
+
+    def test_localized_names_and_cache(self):
+        with tempfile.TemporaryDirectory() as folder:
+            desktop = Path(folder) / "calc.desktop"
+            desktop.write_text(
+                "[Desktop Entry]\nType=Application\nName=Calculator\nName[fr]=Calculatrice\nExec=gnome-calculator %U\n",
+                encoding="utf-8",
+            )
+            application_launcher._APP_CACHE.update(time=0.0, apps=[])
+            with patch.object(application_launcher, "_desktop_files", return_value=[desktop]), \
+                 patch.object(application_launcher.sys, "platform", "linux"):
+                found = application_launcher.find_application("calculatrice")
+                self.assertEqual(found["argv"], ["gnome-calculator"])
+                desktop.unlink()  # le cache évite de rescanner le disque à chaque lancement
+                self.assertIsNotNone(application_launcher.find_application("calculator"))
+            application_launcher._APP_CACHE.update(time=0.0, apps=[])
+
+
+if __name__ == "__main__":
+    unittest.main()
