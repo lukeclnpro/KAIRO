@@ -3,7 +3,7 @@
 > Une interface locale pour utiliser des modèles d'IA directement depuis votre machine, avec une intégration **Ollama optionnelle**.
 
 <!-- VERSION:START -->
-**Version actuelle : `0.2.0`**
+**Version actuelle : `0.2.0.4`**
 <!-- VERSION:END -->
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
@@ -134,9 +134,34 @@ Le contenu ci-dessous est **généré automatiquement** à partir de ces deux fi
 
 <!-- UPDATES:START -->
 <details>
-<summary>Version `0.2.0.0(beta1+2)` — 2026-09-24 · **Lecture de fichier + lancement de programme (beta1+2)**</summary>
+<summary>Version `0.2.0.4` — 2026-09-28 · **Recherche web multi-catégories**</summary>
 
-- Ajout de la possibilité de l'ia de lancer des programme via une demande simple, pas de commande necessaire.
+- Ajout de catégories de recherche : Web général, actualités, sites officiels, annonces et météo.
+- Recherche Google tentée en premier, avec repli automatique sur DuckDuckGo si les résultats Google ne sont pas accessibles.
+- Routage des demandes de recherche vers la catégorie adaptée et transmission du type de recherche à l'outil web.
+
+</details>
+
+<details>
+<summary>Version `0.2.0.3(beta5)` — 2026-09-28 · **Recherche web, applications et conversations (beta5)**</summary>
+
+- Ajout d'un outil de recherche web pour les informations récentes, dont la météo actuelle par ville via Open-Meteo.
+- Ajout d'une réponse déterministe à la question sur la date du jour.
+- Réparation du lancement d'applications, avec détection automatique et autorisation distincte de l'exécution de commandes.
+- Mémorisation persistante des chemins et alias d'applications fournis dans la conversation, avec tolérance aux fautes de frappe courantes.
+- Compréhension des corrections contextuelles comme « WhatsApp s'appelle ZapZap » après un lancement infructueux.
+- Protection contre l'interprétation d'appels d'outils recopiés comme des chemins d'application.
+- Génération et mise à jour automatiques du titre de conversation selon son sujet, affiché dans l'interface web et le CLI.
+- Conservation des sujets de conversation définis manuellement.
+
+</details>
+
+<details>
+<summary>Version `0.2.0.2(beta4)` — 2026-09-27 · **Utilisation de la nouvelle API OpenRouter (beta4)**</summary>
+
+- Ajout de la possibilité d'utiliser l'API OpenRouter pour les modèles LLM.
+- Ajout d'une option de configuration pour choisir entre Ollama et OpenRouter.
+- Mise à jour de la documentation pour inclure les instructions d'utilisation d'OpenRouter.
 
 </details>
 
@@ -165,16 +190,14 @@ Le contenu ci-dessous est **généré automatiquement** à partir de ces deux fi
 </details>
 
 <details>
-<summary>Version `0.2.0.2(beta4)` — 2026-09-26 · **Utilisation de la nouvelle API OpenRouter (beta4)**</summary>
+<summary>Version `0.2.0.0(beta1+2)` — 2026-09-25 · **Lecture de fichier + lancement de programme (beta1+2)**</summary>
 
-- Ajout de la possibilité d'utiliser l'API OpenRouter pour les modèles LLM.
-- Ajout d'une option de configuration pour choisir entre Ollama et OpenRouter.
-- Mise à jour de la documentation pour inclure les instructions d'utilisation d'OpenRouter.
+- Ajout de la possibilité de l'ia de lancer des programme via une demande simple, pas de commande necessaire.
 
 </details>
 
 <details>
-<summary>Version `0.1.8` — 2026-09-23 · **Lecture de fichier**</summary>
+<summary>Version `0.1.8` — 2026-09-24 · **Lecture de fichier**</summary>
 
 - Ajout d'une commande dans le chat qui permet de donner a l'ia un fichier. (/fichier chemin/vers/le/fichier). Pour l'instant, lecture uniquement.
 

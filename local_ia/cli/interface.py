@@ -84,6 +84,7 @@ def _chat_info(chat):
     print(f"Chat : {chat['id']}")
     print(f"Créé : {chat.get('created_at', 'inconnu')}")
     print(f"Messages : {len(chat.get('messages', []))}")
+    print(f"Nom : {chat.get('topic') or chat.get('title') or 'Conversation sans titre'}")
     print(f"Sujet : {chat.get('topic') or 'aucun'}")
     print(f"Fichiers : {len(chat.get('files', []))}")
 
@@ -108,7 +109,8 @@ def main():
         ui.section_title("IA AGENT LOCAL", clear=False)
         print(f"Modèle : {model_config(load_config())}")
         print(f"Contexte : {CONTEXT_PATH}")
-        print(f"Conversation : {chat['id']}")
+        conversation_title = chat.get("topic") or chat.get("title") or "sans titre"
+        print(f"Conversation : {chat['id']} | {conversation_title}")
         print("Tapez /help pour afficher les commandes.\n")
         replay_history(chat)
 
@@ -139,7 +141,7 @@ def main():
                 show_context(context)
                 continue
             if user_message == "/topic":
-                print(chat.get("topic") or "Aucun sujet défini.")
+                print(chat.get("topic") or chat.get("title") or "Aucun sujet défini.")
                 continue
             if user_message.startswith("/topic "):
                 chat["topic"] = user_message[7:].strip()
@@ -147,7 +149,8 @@ def main():
                 continue
             if user_message == "/chats":
                 for item in list_chats():
-                    print(f"{item['id']} | {item.get('topic') or 'sans sujet'} | {len(item.get('messages', []))} messages")
+                    title = item.get("topic") or item.get("title") or item.get("summary") or "sans titre"
+                    print(f"{item['id']} | {title} | {len(item.get('messages', []))} messages")
                 continue
             if user_message == "/new":
                 chat = create_chat()
@@ -205,6 +208,9 @@ def main():
                 sys.stdout.flush()
             add_chat_message(chat, "user", user_message)
             add_chat_message(chat, "assistant", answer)
+            conversation_title = chat.get("topic") or chat.get("title")
+            if conversation_title:
+                print(f"Conversation : {chat['id']} | {conversation_title}")
             render_message("assistant", answer)
     finally:
         if agent is not None:

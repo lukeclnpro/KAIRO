@@ -26,7 +26,7 @@ function renderChats(){
  if(!state.chats.length){el.innerHTML="<div class=\"muted\">Aucune conversation</div>";return}
  el.innerHTML=state.chats.map(c=>{
    const count=Array.isArray(c.messages)?c.messages.length:0;
-   const title=c.summary||c.topic||(`Conversation #${c.id}`);
+  const title=c.topic||c.title||c.summary||(`Conversation #${c.id}`);
    return `<button class="chat-item ${state.current&&String(state.current.id)===String(c.id)?"active":""}" data-id="${c.id}"><b>${esc(title)}</b><span>${count} message${count>1?"s":""}</span></button>`;
  }).join("");
  el.querySelectorAll(".chat-item").forEach(b=>b.onclick=async()=>{

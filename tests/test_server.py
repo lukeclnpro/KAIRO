@@ -39,6 +39,7 @@ class ServerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, patch.object(server, "CHAT_DIR", Path(directory)):
             chat = server.create_chat()
         self.assertIn("summary_updated_at", chat)
+        self.assertEqual(chat["title"], "")
         self.assertIn("messages", chat)
 
     def test_chat_agent_and_conversation_are_cached(self):
@@ -78,8 +79,10 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(message, "lis app.py\n\nextrait du fichier")
         self.assertEqual(
             session["agent"].respond.call_args.kwargs["allowed_tools"],
-            {"memory", "context", "file", "write", "edit", "list", "search"},
+            {"memory", "context", "file", "write", "edit", "list", "search", "web", "launch"},
         )
+        self.assertNotIn("command", session["agent"].respond.call_args.kwargs["allowed_tools"])
+        self.assertNotIn("system", session["agent"].respond.call_args.kwargs["allowed_tools"])
 
     def test_concurrent_new_chats_get_unique_ids(self):
         count = 12

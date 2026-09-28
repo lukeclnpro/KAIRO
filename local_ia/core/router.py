@@ -11,6 +11,19 @@ _SYSTEM_INFO = re.compile(
     r"\b(?:syst[eè]me(?: d'exploitation)?|\bos\b|informations? syst[eè]me)\b", re.I
 )
 _MEMORY = re.compile(r"\b(?:m[ée]moire|souviens-toi|rappelle-toi)\b", re.I)
+_WEB_INFO = re.compile(
+    r"\b(?:actualit[ée]s?|actu|news|info|infos|m[ée]t[ée]o|weather|pr[ée]visions?\s+m[ée]t[ée]o|"
+    r"aujourd'hui|en\s+ce\s+moment|actuellement|derni[eè]res?\s+(?:infos?|nouvelles?)|"
+    r"cours\s+(?:de\s+)?(?:bourse|\w+)|taux\s+de\s+change|trafic)\b",
+    re.I,
+)
+_WEB_SEARCH = re.compile(
+    r"\b(?:google|annonces?|petites annonces|site(?:s)?(?: officiel(?:s)?| web| internet)|"
+    r"recherch(?:e|er)\s+(?:sur\s+)?(?:internet|le web)|"
+    r"cherche(?:r)?\s+(?:sur\s+)?(?:google|internet|le web)|"
+    r"[àa]\s+vendre|[àa]\s+louer)\b",
+    re.I,
+)
 _FILE_TARGET = re.compile(
     r"(?:[/\\]|\b[\w.-]+\.(?:py|js|ts|tsx|jsx|html|css|json|txt|md|sh|sql|rs|go|java)\b|\b(?:fichier|dossier|r[ée]pertoire|projet|script|code|programme)\b)",
     re.I,
@@ -55,6 +68,9 @@ class RequestRouter:
             return {"mode": "tool", "action": "memory", "tools": ("memory",), "answer": None}
         if _LAUNCH.search(text):
             return {"mode": "tool", "action": "launch", "tools": ("launch",), "answer": None}
+
+        if _WEB_INFO.search(text) or _WEB_SEARCH.search(text):
+            return {"mode": "tool", "action": "web", "tools": ("web",), "answer": None}
 
         if _SIMPLE_QUESTION.search(text) and "?" in text:
             return {"mode": "chat", "action": "chat", "tools": (), "answer": None}

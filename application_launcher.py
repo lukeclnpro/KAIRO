@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import configparser
+import difflib
+import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -23,6 +26,116 @@ _ALIASES = {
 }
 # Jetons ajoutés par Flatpak dans la ligne Exec, à ne pas passer à l'application.
 _FLATPAK_FIELD_CODES = {"@@", "@@u", "@@f", "@@F"}
+
+
+def _registry_path():
+    if os.name == "nt":
+        data_home = Path(os.environ.get("APPDATA", Path.home() / "AppData/Roaming"))
+    elif sys.platform == "darwin":
+        data_home = Path.home() / "Library/Application Support"
+    else:
+        data_home = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
+    return data_home / "local_ia" / "applications.json"
+
+
+def _normalize_name(name):
+    return "".join(character for character in str(name).casefold() if character.isalnum())
+
+
+def _read_registry():
+    try:
+        data = json.loads(_registry_path().read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _write_registry(data):
+    path = _registry_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(path)
+
+
+def _application_from_path(path: Path):
+    path = path.expanduser()
+    if not path.exists():
+        return None
+    path = path.resolve()
+
+    if sys.platform.startswith("linux") and path.suffix.lower() == ".desktop":
+        return _desktop_application(path)
+    if sys.platform == "darwin" and path.is_dir() and path.suffix.lower() == ".app":
+        return {
+            "name": path.stem,
+            "names": [path.stem.casefold()],
+            "argv": ["open", "-a", str(path)],
+            "path": str(path),
+        }
+    if os.name == "nt" and path.suffix.lower() == ".lnk":
+        return {
+            "name": path.stem,
+            "names": [path.stem.casefold()],
+            "argv": [str(path)],
+            "path": str(path),
+        }
+    if path.is_file() and (
+        (os.name == "nt" and path.suffix.lower() in {".exe", ".com"})
+        or os.access(path, os.X_OK)
+    ):
+        return {
+            "name": path.stem,
+            "names": [path.stem.casefold()],
+            "argv": [str(path)],
+            "path": str(path),
+        }
+    return None
+
+
+def register_application(name: str, path: str):
+    """Save a user-provided application path under its display and localized names."""
+    application = _application_from_path(Path(path))
+    if not application:
+        raise FileNotFoundError(f"Chemin d'application introuvable ou non exécutable : {path}")
+
+    display_name = str(name or application["name"]).strip()
+    if not display_name:
+        raise ValueError("Nom d'application vide.")
+    application["name"] = display_name
+    application["names"] = sorted(set(application["names"] + [display_name.casefold()]))
+
+    registry = _read_registry()
+    for alias in application["names"]:
+        key = _normalize_name(alias)
+        if key:
+            registry[key] = {"name": display_name, "path": application["path"]}
+    _write_registry(registry)
+    return application
+
+
+def register_application_alias(alias: str, application_name: str):
+    """Map a user-facing app name to an installed app or an explicit path."""
+    alias = str(alias or "").strip()
+    if not alias:
+        raise ValueError("Nom d'application vide.")
+
+    requested_path = Path(str(application_name or "")).expanduser()
+    if requested_path.is_absolute() or requested_path.exists():
+        application = _application_from_path(requested_path)
+    else:
+        application = find_application(application_name)
+    if not application:
+        raise FileNotFoundError(f"Application introuvable : {application_name}")
+
+    application = register_application(application["name"], application["path"])
+    registry = _read_registry()
+    registry[_normalize_name(alias)] = {
+        "name": application["name"],
+        "path": application["path"],
+    }
+    _write_registry(registry)
+    return application
 
 
 def _desktop_files():
@@ -126,9 +239,38 @@ def _match(applications, query, aliases=()):
 
 
 def find_application(name: str):
-    query = str(name or "").strip().lower()
-    if not query:
+    raw_query = str(name or "").strip().strip("\"'")
+    if not raw_query:
         raise ValueError("Nom d'application vide.")
+
+    requested_path = Path(raw_query).expanduser()
+    if requested_path.is_absolute() or requested_path.exists():
+        application = _application_from_path(requested_path)
+        if application:
+            return register_application(application["name"], str(requested_path))
+        if requested_path.is_absolute():
+            return None
+
+    query = raw_query.lower()
+    registry = _read_registry()
+    normalized_query = _normalize_name(query)
+    registered = registry.get(normalized_query)
+    if registered is None and len(normalized_query) >= 5:
+        close_alias = max(
+            registry,
+            key=lambda alias: difflib.SequenceMatcher(None, normalized_query, alias).ratio(),
+            default=None,
+        )
+        if close_alias and difflib.SequenceMatcher(None, normalized_query, close_alias).ratio() >= 0.82:
+            registered = registry[close_alias]
+    if isinstance(registered, dict):
+        application = _application_from_path(Path(registered.get("path", "")))
+        if application:
+            application["name"] = registered.get("name") or application["name"]
+            application["names"] = sorted(
+                set(application["names"] + [application["name"].casefold()])
+            )
+            return application
 
     aliases = _ALIASES.get(query, ())
     executable = shutil.which(query)

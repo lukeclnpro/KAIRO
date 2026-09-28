@@ -37,6 +37,27 @@ class RequestRouterTest(unittest.TestCase):
         self.assertEqual(route["mode"], "chat")
         self.assertEqual(route["tools"], ())
 
+    def test_current_information_is_routed_to_web_tool(self):
+        route = self.router.route("Quelle est la météo à Paris aujourd'hui ?", lambda *_: None)
+        self.assertEqual(route["mode"], "tool")
+        self.assertEqual(route["tools"], ("web",))
+
+    def test_unaccented_weather_request_is_routed_to_web_tool(self):
+        route = self.router.route("meteo a metz", lambda *_: None)
+        self.assertEqual(route["mode"], "tool")
+        self.assertEqual(route["tools"], ("web",))
+
+    def test_web_search_categories_are_routed_to_web_tool(self):
+        for message in (
+            "annonces vélo à Metz",
+            "trouve le site officiel de la mairie de Metz",
+            "recherche Google sur les actualités de Macron",
+        ):
+            with self.subTest(message=message):
+                route = self.router.route(message, lambda *_: None)
+                self.assertEqual(route["mode"], "tool")
+                self.assertEqual(route["tools"], ("web",))
+
     def test_code_change_is_routed_to_tool_mode(self):
         route = self.router.route("Corrige le bug dans agent.py", lambda *_: None)
         self.assertEqual(route["mode"], "tool")
@@ -88,7 +109,7 @@ class ContextCompilerTest(unittest.TestCase):
         route = {"mode": "agent", "tools": None}
         self.assertEqual(
             ToolManager.get_tools(route),
-            {"memory", "context", "file", "write", "edit", "list", "search", "launch", "command", "system"},
+            {"memory", "context", "file", "write", "edit", "list", "search", "launch", "command", "system", "web"},
         )
 
     def test_validate_refuses_tools_outside_allowlist(self):

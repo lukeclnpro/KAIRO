@@ -32,7 +32,27 @@ class ConversationTest(unittest.TestCase):
         conversation.add_chat_message(chat, "user", "Bonjour")
         loaded = conversation.load_chat(chat["id"])
         self.assertEqual(loaded["messages"][0]["content"], "Bonjour")
+        self.assertEqual(loaded["title"], "")
         self.assertEqual(len(conversation.list_chats()), 1)
+
+    def test_title_tracks_explicit_topic_and_keeps_it_for_followups(self):
+        chat = conversation.create_chat()
+        conversation.add_chat_message(chat, "user", "Donne-moi plein d'infos sur macron")
+        self.assertEqual(chat["title"], "Questions sur Macron")
+
+        conversation.add_chat_message(chat, "assistant", "Voici les informations.")
+        conversation.add_chat_message(chat, "user", "Quel âge a-t-il ?")
+        self.assertEqual(chat["title"], "Questions sur Macron")
+
+        conversation.add_chat_message(chat, "user", "Quelle est la météo à Metz aujourd'hui ?")
+        self.assertEqual(chat["title"], "Météo à Metz")
+
+    def test_manual_topic_is_not_replaced_by_generated_title(self):
+        chat = conversation.create_chat()
+        chat["topic"] = "Projet personnel"
+        conversation.add_chat_message(chat, "user", "Parle-moi de Macron")
+        self.assertEqual(chat["title"], "Questions sur Macron")
+        self.assertEqual(chat["topic"], "Projet personnel")
 
     def test_load_chat_rejects_path_traversal_ids(self):
         outside = self.chat_dir.parent / "outside.json"
@@ -82,6 +102,7 @@ class ConversationTest(unittest.TestCase):
         conversation.clear_chat(chat)
         cleared = conversation.load_chat(chat["id"])
         self.assertEqual(cleared["messages"], [])
+        self.assertEqual(cleared["title"], "")
         self.assertNotIn("pending_tool", cleared)
 
     def test_save_chat_supports_async_background_write(self):

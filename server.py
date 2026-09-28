@@ -280,7 +280,7 @@ def chat_with_model(model, chat, file_context=None, execution_context=None, allo
     if extra_context:
         current_message += "\n\n" + extra_context
 
-    allowed_tools = {"memory", "context", "file", "write", "edit", "list", "search"}
+    allowed_tools = {"memory", "context", "file", "write", "edit", "list", "search", "web", "launch"}
     if allow_command_tool:
         allowed_tools.update({"launch", "command", "system"})
 

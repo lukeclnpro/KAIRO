@@ -25,13 +25,8 @@ def load_json(path: Path) -> dict:
 
 
 def version_tuple(version: str) -> tuple[int, ...]:
-    values = []
-    for part in str(version).lstrip("v").split("."):
-        try:
-            values.append(int(part))
-        except ValueError:
-            values.append(0)
-    return tuple(values)
+    values = re.findall(r"\d+", str(version).strip().lstrip("v"))
+    return tuple(int(value) for value in values) if values else (0, 0, 0)
 
 
 def render_version(data: dict) -> str:

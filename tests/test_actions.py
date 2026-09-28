@@ -6,6 +6,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+from datetime import date as date_type
 from pathlib import Path
 from unittest.mock import patch
 
@@ -62,11 +63,105 @@ class FastPathTest(ActionTestCase):
         self.assertEqual(answer, "Je ne trouve pas cette application.")
         self.assertEqual(ask.call_count, 1)
 
-    def test_files_and_paths_are_not_treated_as_applications(self):
+    def test_file_requests_are_not_treated_as_applications(self):
         with patch.object(application_launcher, "find_application") as find:
             self.assertIsNone(self.agent.fast_path("ouvre le fichier notes.txt"))
-            self.assertIsNone(self.agent.fast_path("lance /usr/bin/python3"))
         find.assert_not_called()
+
+    def test_explicit_application_path_is_saved_and_reusable_by_name(self):
+        application_path = self.tmp / "ZapZap App"
+        application_path.write_text("#!/bin/sh\n", encoding="utf-8")
+        application_path.chmod(0o755)
+        registry_path = self.tmp / "applications.json"
+
+        with patch.object(application_launcher, "_registry_path", return_value=registry_path), \
+             patch.object(application_launcher.subprocess, "Popen") as process:
+            answer = self.agent.respond({"messages": []}, f"lance {application_path}")
+            saved_application = application_launcher.find_application("ZapZap App")
+
+        self.assertEqual(answer, "ZapZap App lancé.")
+        self.assertEqual(saved_application["path"], str(application_path))
+        self.assertEqual(saved_application["argv"], [str(application_path)])
+        self.assertTrue(registry_path.is_file())
+        process.assert_called_once()
+
+    def test_application_path_in_a_statement_is_saved_without_launching(self):
+        application_path = self.tmp / "ZapZap App"
+        application_path.write_text("#!/bin/sh\n", encoding="utf-8")
+        application_path.chmod(0o755)
+        registry_path = self.tmp / "applications.json"
+
+        with patch.object(application_launcher, "_registry_path", return_value=registry_path), \
+             patch.object(application_launcher.subprocess, "Popen") as process, \
+             patch("local_ia.core.agent.ask_ollama") as ask:
+            answer = self.agent.respond(
+                {"messages": []},
+                f"Le chemin de l'application ZapZap est {application_path}",
+            )
+            saved_application = application_launcher.find_application("ZapZap App")
+
+        self.assertEqual(answer, "Chemin de ZapZap App enregistré sous le nom ZapZap.")
+        self.assertEqual(saved_application["path"], str(application_path))
+        process.assert_not_called()
+        ask.assert_not_called()
+
+    def test_application_alias_is_saved_and_common_typo_resolves(self):
+        application_path = self.tmp / "ZapZap"
+        application_path.write_text("#!/bin/sh\n", encoding="utf-8")
+        application_path.chmod(0o755)
+        registry_path = self.tmp / "applications.json"
+
+        with patch.object(application_launcher, "_registry_path", return_value=registry_path), \
+             patch.object(application_launcher.shutil, "which", return_value=str(application_path)), \
+             patch.object(application_launcher.subprocess, "Popen") as process, \
+             patch("local_ia.core.agent.ask_ollama") as ask:
+            answer = self.agent.respond(
+                {"messages": []}, "sur mon pc, whatsapp est zapzap"
+            )
+            found = application_launcher.find_application("watsapp")
+            found_with_typo = application_launcher.find_application("wharsapp")
+            launch_answer = self.agent.respond({"messages": []}, "lance watsapp")
+
+        self.assertEqual(answer, "whatsapp associé à ZapZap pour les prochains lancements.")
+        self.assertEqual(found["path"], str(application_path))
+        self.assertEqual(found["name"], "ZapZap")
+        self.assertEqual(found_with_typo["path"], str(application_path))
+        self.assertEqual(launch_answer, "ZapZap lancé.")
+        process.assert_called_once()
+        ask.assert_not_called()
+
+    def test_followup_app_name_correction_uses_failed_launch_context(self):
+        chat = {
+            "messages": [
+                {"role": "user", "content": "lance whatsapp"},
+                {"role": "assistant", "content": "WhatsApp ne semble pas installé."},
+            ],
+        }
+        application = {"name": "ZapZap", "argv": ["zapzap"], "path": "/usr/bin/zapzap"}
+        with patch.object(
+            application_launcher, "register_application_alias", return_value=application
+        ) as register, patch.object(
+            application_launcher, "launch_application", return_value=application
+        ) as launch, patch("local_ia.core.agent.ask_ollama") as ask:
+            answer = self.agent.respond(chat, "elle s'apelle zapzap")
+
+        self.assertEqual(answer, "ZapZap associé à whatsapp et lancé.")
+        register.assert_called_once_with("whatsapp", "zapzap")
+        launch.assert_called_once_with("whatsapp")
+        ask.assert_not_called()
+
+    def test_copied_tool_call_is_not_mistaken_for_an_application_path(self):
+        pasted_call = (
+            'Je vais lancer ZapZap. <tool_call>{"tool":"launch",'
+            '"arguments":{"name":"ZapZap"}}</tool_call>'
+        )
+        with patch.object(application_launcher, "register_application") as register, \
+             self.ask("Je peux traiter cette demande normalement.") as ask:
+            answer = self.agent.respond({"messages": []}, pasted_call)
+
+        self.assertEqual(answer, "Je peux traiter cette demande normalement.")
+        register.assert_not_called()
+        self.assertEqual(ask.call_count, 1)
 
     def test_respects_allowed_tools(self):
         with patch.object(application_launcher, "find_application") as find:
@@ -90,6 +185,15 @@ class FastPathTest(ActionTestCase):
         ask.assert_not_called()
         self.assertEqual(self.agent.last_route["mode"], "direct")
         self.assertEqual(self.agent.last_route["action"], "fast_path")
+
+    def test_current_date_is_answered_without_ollama(self):
+        with patch("local_ia.core.agent.date") as current_date, \
+             patch("local_ia.core.agent.ask_ollama") as ask:
+            current_date.today.return_value = date_type(2026, 9, 28)
+            answer = self.agent.respond({"messages": []}, "on est quel jour ?")
+        self.assertEqual(answer, "Aujourd'hui, nous sommes le lundi 28 septembre 2026.")
+        ask.assert_not_called()
+        self.assertEqual(self.agent.last_route["mode"], "direct")
 
     def test_system_info_fast_path_respects_tool_permissions(self):
         with patch.object(system, "use") as use:

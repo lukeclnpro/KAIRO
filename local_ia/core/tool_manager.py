@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from local_ia.tools import command, context as context_tool, edit, file as file_tool
-from local_ia.tools import launch, listing, memory, search, system, write
+from local_ia.tools import launch, listing, memory, search, system, web, write
 
 TOOL_INSTRUCTIONS = """Tu disposes d'outils locaux pour agir sur l'ordinateur de l'utilisateur.
 
@@ -17,9 +17,10 @@ Outils et arguments :
 - file : {"path":"..."} — lire un fichier.
 - write : {"path":"...", "content":"..."} — créer un fichier ou le réécrire en entier.
 - edit : {"path":"...", "old":"texte exact", "new":"remplacement"} — corriger une partie d'un fichier.
-- launch : {"name":"..."} — lancer une application installée.
+- launch : {"name":"..."} — lancer une application par son nom ou son chemin ; mémoriser tout chemin fourni.
 - command : {"argv":["programme","argument"], "cwd":"/dossier"} — exécuter une commande, sans shell ni pipe.
 - system : {"action":"info|up|down|mute|unmute|install|update", "value":"nom-paquet"}
+- web : {"query":"...", "category":"web|news|sites|ads|weather", "max_results":5} — chercher sur Google (repli automatique si indisponible). Catégories : web, news, sites officiels, annonces, météo.
 
 Pour utiliser un outil, réponds UNIQUEMENT avec cette structure :
 <tool_call>{"tool":"file","arguments":{"path":"/chemin/fichier"}}</tool_call>
@@ -129,6 +130,7 @@ class ToolManager:
     TOOL_GROUPS = {
         "filesystem": frozenset({"file", "write", "edit", "list", "search"}),
         "system": frozenset({"launch", "command", "system"}),
+        "web": frozenset({"web"}),
         "memory": frozenset({"memory"}),
         "context": frozenset({"context"}),
     }
@@ -140,9 +142,10 @@ class ToolManager:
         "file": 'file : {"path":"..."} — lire un fichier.',
         "write": 'write : {"path":"...", "content":"..."} — créer ou réécrire un fichier.',
         "edit": 'edit : {"path":"...", "old":"texte exact", "new":"remplacement"} — modifier un fichier.',
-        "launch": 'launch : {"name":"..."} — lancer une application installée.',
+        "launch": 'launch : {"name":"..."} — lancer une application par son nom ou son chemin ; mémoriser tout chemin fourni.',
         "command": 'command : {"argv":["programme","argument"], "cwd":"/dossier"} — exécuter sans shell.',
         "system": 'system : {"action":"info|up|down|mute|unmute|install|update", "value":"nom-paquet"} — information ou action système.',
+        "web": 'web : {"query":"...", "category":"web|news|sites|ads|weather", "max_results":5} — rechercher sur Google, avec repli automatique. Utiliser news pour les actualités, sites pour trouver un site officiel, ads pour les annonces, weather pour la météo.',
     }
     ALL_TOOLS = frozenset().union(*TOOL_GROUPS.values())
 
@@ -212,6 +215,12 @@ class ToolManager:
             return system.use(
                 arg(arguments, "action"), arguments.get("value"),
                 arguments.get("amount", 5), arguments.get("confirmed", False),
+            )
+        if tool_name == "web":
+            return web.search(
+                arg(arguments, "query"),
+                arguments.get("max_results", 5),
+                arguments.get("category", "web"),
             )
         raise ValueError(f"Outil inconnu : {tool_name}")
 

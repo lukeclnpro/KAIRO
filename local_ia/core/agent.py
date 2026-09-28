@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import date
+from pathlib import Path
 
 import application_launcher
 from local_ia.config.manager import model_config
@@ -39,7 +41,7 @@ TOOL_ALIASES = {
 }
 PAYLOAD_KEYS = (
     "name", "argv", "path", "content", "extension", "action", "value", "amount",
-    "old", "new", "replace_all", "pattern", "cwd", "timeout", "max_results",
+    "old", "new", "replace_all", "pattern", "cwd", "timeout", "max_results", "query", "category",
 )
 
 MAX_TOOL_STEPS = 4
@@ -71,6 +73,41 @@ _SYSTEM_INFO_RE = re.compile(
     r"(?:\s+(?:j'utilise|utilise-je|sur mon pc))?|quelle version (?:de )?(?:mon )?(?:syst[eè]me|os))\s*[?.!]*$",
     re.I,
 )
+_DATE_RE = re.compile(
+    r"^(?:on est quel jour|quel jour (?:sommes-nous|est-on|on est|est-il)|"
+    r"quelle est la date|quelle date(?: sommes-nous| est-on| du jour)?|on est le combien)"
+    r"(?: aujourd'hui)?\s*[?.!]*$",
+    re.I,
+)
+_APP_PATH_RE = re.compile(
+    r"(?P<path>(?:~[/\\]|/|[A-Za-z]:[\\/]|\.{1,2}[/\\])[^<>\r\n]+)"
+)
+_APP_PATH_CONTEXT_RE = re.compile(
+    r"\b(?:application|appli|app|logiciel|chemin|install[ée]e?|se trouve|ici)\b",
+    re.I,
+)
+_APP_ALIAS_RE = re.compile(
+    r"^(?:le\s+)?(?:chemin|alias|nom)\s+(?:de|pour)\s+"
+    r"(?:(?:l['’])?(?:application|appli|app)\s+)?"
+    r"(?P<alias>[\w][\w .'-]*?)\s+(?:c['’]est|est|=|:)\s+(?P<target>.+?)\s*[.!?]*$",
+    re.I,
+)
+_APP_PC_ALIAS_RE = re.compile(
+    r"^(?:sur|dans)\s+(?:mon|le)\s+pc\s*[,;:]?\s*"
+    r"(?P<alias>[\w][\w .'-]*?)\s+(?:c['’]est|est|=|s'appelle|correspond à)\s+"
+    r"(?P<target>.+?)\s*[.!?]*$",
+    re.I,
+)
+_APP_CORRECTION_RE = re.compile(
+    r"^(?:c['’]est|(?:elle|il)\s+s['’]app?elle|(?:son|leur)\s+nom\s+est)\s+"
+    r"(?P<name>.+?)\s*[.!?]*$",
+    re.I,
+)
+_FAILED_LAUNCH_RE = re.compile(
+    r"\b(?:introuvable|ne\s+\w+\s+pas|pas\s+(?:install[ée]e?|reconnu|accessible)|"
+    r"impossible|[ée]chou[ée])\b",
+    re.I,
+)
 _VOLUME_RULES = (
     (re.compile(_POLITE + r"(?:baisse|diminue|r[ée]duis)\s+(?:un peu\s+)?le\s+(?:volume|son)" + _AMOUNT, re.I),
      "down", "Volume baissé."),
@@ -84,6 +121,41 @@ _VOLUME_RULES = (
 
 
 class LocalAgent:
+    @staticmethod
+    def _contextual_app_correction(chat, message, allowed_tools=None):
+        if allowed_tools is not None and "launch" not in allowed_tools:
+            return None
+        correction = _APP_CORRECTION_RE.fullmatch(str(message or "").strip())
+        if not correction:
+            return None
+        corrected_name = correction.group("name").strip(" .!?\"'")
+
+        messages = chat.get("messages", [])
+        for index in range(len(messages) - 1, -1, -1):
+            item = messages[index]
+            if item.get("role") != "user":
+                continue
+            launch_request = _LAUNCH_RE.fullmatch(str(item.get("content", "")).strip())
+            if not launch_request:
+                continue
+            assistant_reply = next(
+                (entry.get("content", "") for entry in messages[index + 1:] if entry.get("role") == "assistant"),
+                "",
+            )
+            if not _FAILED_LAUNCH_RE.search(assistant_reply):
+                return None
+
+            requested_name = _NAME_PREFIX_RE.sub(
+                "", launch_request.group("name").strip()
+            ).strip(" .!?\"'")
+            try:
+                application_launcher.register_application_alias(requested_name, corrected_name)
+                launched = application_launcher.launch_application(requested_name)
+            except (FileNotFoundError, OSError, ValueError) as error:
+                return f"J'ai compris que {requested_name} s'appelle {corrected_name}, mais le lancement a échoué : {error}"
+            return f"{launched.get('name', corrected_name)} associé à {requested_name} et lancé."
+        return None
+
     @staticmethod
     def normalize_tool_call(tool_call):
         if not isinstance(tool_call, dict):
@@ -183,6 +255,56 @@ class LocalAgent:
         if not text or "\n" in text:
             return None
 
+        if "<tool_call>" in text.casefold():
+            return None
+
+        alias_match = _APP_ALIAS_RE.fullmatch(text) or _APP_PC_ALIAS_RE.fullmatch(text)
+        if alias_match:
+            alias = alias_match.group("alias").strip(" .!?\"'")
+            target = alias_match.group("target").strip().strip("\"'`").rstrip(".,;:!?")
+            try:
+                target_path = Path(target).expanduser()
+                target_is_path = (
+                    target_path.is_absolute()
+                    or target_path.exists()
+                    or bool(re.match(r"^[A-Za-z]:[\\/]", target))
+                )
+            except (OSError, ValueError):
+                target_is_path = bool(re.match(r"^[A-Za-z]:[\\/]", target))
+            try:
+                application = application_launcher.register_application_alias(alias, target)
+            except (FileNotFoundError, OSError, ValueError) as error:
+                return f"Je n'ai pas pu associer {alias} à {target} : {error}"
+            if target_is_path:
+                return f"Chemin de {application['name']} enregistré sous le nom {alias}."
+            return f"{alias} associé à {application['name']} pour les prochains lancements."
+
+        if not _LAUNCH_RE.fullmatch(text) and _APP_PATH_CONTEXT_RE.search(text):
+            path_match = _APP_PATH_RE.search(text)
+            if path_match:
+                application_path = path_match.group("path").strip().strip("\"'`").rstrip(".,;:!?")
+                try:
+                    application = application_launcher.register_application(None, application_path)
+                except (FileNotFoundError, OSError, ValueError) as error:
+                    return f"Je n'ai pas pu enregistrer ce chemin d'application : {error}"
+                return (
+                    f"Chemin de {application['name']} enregistré pour les prochains lancements."
+                )
+
+        if _DATE_RE.fullmatch(text):
+            today = date.today()
+            weekdays = (
+                "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche",
+            )
+            months = (
+                "janvier", "février", "mars", "avril", "mai", "juin",
+                "juillet", "août", "septembre", "octobre", "novembre", "décembre",
+            )
+            return (
+                f"Aujourd'hui, nous sommes le {weekdays[today.weekday()]} "
+                f"{today.day} {months[today.month - 1]} {today.year}."
+            )
+
         for pattern, action, answer in _VOLUME_RULES:
             match = pattern.fullmatch(text)
             if not match:
@@ -214,12 +336,17 @@ class LocalAgent:
         if not match:
             return None
         name = _NAME_PREFIX_RE.sub("", match.group("name").strip()).strip(" .!?\"'")
+        try:
+            requested_path = Path(name).expanduser()
+            is_path = requested_path.is_absolute() or requested_path.exists()
+        except (OSError, ValueError):
+            is_path = bool(re.match(r"^[A-Za-z]:[\\/]", name))
         if (
             not name
-            or "/" in name or "\\" in name
+            or (("/" in name or "\\" in name) and not is_path)
             or _NOT_AN_APP.match(name)
-            or _FILE_EXTENSION_RE.search(name)
-            or len(name.split()) > 4
+            or (_FILE_EXTENSION_RE.search(name) and not is_path)
+            or (len(name.split()) > 4 and not is_path)
         ):
             return None
         if allowed_tools is not None and "launch" not in allowed_tools:
@@ -247,7 +374,7 @@ class LocalAgent:
             # Tolère les balises simplifiées émises par certains petits modèles,
             # par exemple : <write{"tool":"file",...})
             match = re.search(
-                r"<(write(?:\.py)?|file|launch|command|system|edit|list|search)\s*(\{.*)",
+                r"<(write(?:\.py)?|file|launch|command|system|edit|list|search|web)\s*(\{.*)",
                 content or "",
                 re.S | re.I,
             )
@@ -323,7 +450,14 @@ class LocalAgent:
             pending_tool = None
 
         if not pending_tool:
-            route = self.router.route(message, self.fast_path, allowed_tools)
+            route = self.router.route(
+                message,
+                lambda current_message, tools: (
+                    self.fast_path(current_message, tools)
+                    or self._contextual_app_correction(chat, current_message, tools)
+                ),
+                allowed_tools,
+            )
             self.last_route = route
             logging.getLogger(__name__).debug(
                 "Requête IA routée : mode=%s action=%s outils=%s",

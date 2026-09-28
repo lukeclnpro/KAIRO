@@ -8,6 +8,7 @@ from pathlib import Path
 
 import json
 import os
+import re
 import time
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
@@ -869,15 +870,12 @@ def version_to_tuple(version):
     en tuple comparable.
     """
     try:
-        parts = str(version).strip().lstrip("v").split(".")
-
-        return tuple(
-            int(part)
-            for part in parts
-        )
-
-    except (ValueError, AttributeError):
-        return (0, 0, 0)
+        parts = re.findall(r"\d+", str(version).strip().lstrip("v"))
+        if parts:
+            return tuple(int(part) for part in parts)
+    except (ValueError, TypeError):
+        pass
+    return (0, 0, 0)
 
 
 def check_for_update(show_message=True):
