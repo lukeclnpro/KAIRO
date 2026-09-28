@@ -134,7 +134,7 @@ Le contenu ci-dessous est **généré automatiquement** à partir de ces deux fi
 
 <!-- UPDATES:START -->
 <details>
-<summary>Version `0.2.0.4` — 2026-09-28 · **Recherche web multi-catégories**</summary>
+<summary>Version `0.2.0.4(beta6)` — 2026-09-28 · **Recherche web multi-catégories (beta6)**</summary>
 
 - Ajout de catégories de recherche : Web général, actualités, sites officiels, annonces et météo.
 - Recherche Google tentée en premier, avec repli automatique sur DuckDuckGo si les résultats Google ne sont pas accessibles.
