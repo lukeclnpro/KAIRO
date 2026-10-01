@@ -68,6 +68,47 @@ class FastPathTest(ActionTestCase):
             self.assertIsNone(self.agent.fast_path("ouvre le fichier notes.txt"))
         find.assert_not_called()
 
+
+class LocalCodeAgentTest(ActionTestCase):
+    def test_local_code_creates_script_from_markdown_wrapped_tool_call(self):
+        script_path = self.tmp / "demonstration.py"
+        tool_call = tool(
+            "write",
+            path=str(script_path),
+            content='def greet(name):\n    return f"Bonjour, {name} !"\n\nprint(greet("KAIRO"))\n',
+        )
+        markdown_call = f"J'ai préparé le script.\n```xml\n{tool_call}\n```"
+        with self.ask(markdown_call, "Le script de démonstration est créé et prêt à lancer.") as ask:
+            answer = self.agent.respond(
+                {"messages": []},
+                "crée un script pour faire une démonstration",
+                allowed_tools={"file", "write"},
+                local_code=True,
+            )
+
+        self.assertEqual(ask.call_count, 2)
+        self.assertIn("Bonjour, {name}", script_path.read_text(encoding="utf-8"))
+        self.assertIn("démonstration", answer)
+
+    def test_local_code_agent_recovers_from_plan_and_continues_after_write(self):
+        created_file = self.tmp / "index.html"
+        with self.ask(
+            "Je vais créer un plan puis le fichier HTML.",
+            tool("write", path=str(created_file), content="<h1>dashboard</h1>"),
+            "Le fichier est relu et le projet est terminé.",
+        ) as ask:
+            answer = self.agent.respond(
+                {"messages": []},
+                "crée une page html",
+                allowed_tools={"file", "write"},
+                local_code=True,
+            )
+
+        self.assertEqual(ask.call_count, 3)
+        self.assertTrue(all(call.kwargs["max_tokens"] == 4096 for call in ask.call_args_list))
+        self.assertEqual(created_file.read_text(encoding="utf-8"), "<h1>dashboard</h1>")
+        self.assertEqual(answer, "Le fichier est relu et le projet est terminé.")
+
     def test_explicit_application_path_is_saved_and_reusable_by_name(self):
         application_path = self.tmp / "ZapZap App"
         application_path.write_text("#!/bin/sh\n", encoding="utf-8")
@@ -203,6 +244,17 @@ class FastPathTest(ActionTestCase):
 
 
 class ToolLoopTest(ActionTestCase):
+    def test_messages_sent_to_model_include_history_importance(self):
+        chat = {"id": 42, "topic": "tests", "messages": [
+            {"role": "user", "content": "question précédente"},
+        ]}
+
+        messages = self.agent.build_messages(chat, "question actuelle")
+
+        self.assertIn("[Importance: 100%] question précédente", messages[1]["content"])
+        self.assertEqual(messages[-1], {"role": "user", "content": "question actuelle"})
+        self.assertEqual(chat["messages"][0]["content"], "question précédente")
+
     def test_system_prompt_is_prepared_once_per_chat(self):
         chat = {"id": 42, "topic": "tests", "messages": []}
         with patch("local_ia.core.context_compiler.build_system_prompt", return_value="prompt") as build_prompt:
@@ -247,6 +299,39 @@ class ToolLoopTest(ActionTestCase):
         self.assertIn("note.txt", answer)
         self.assertEqual(Path(target).read_text(), "salut")
 
+    def test_model_cannot_claim_write_success_without_readback_proof(self):
+        target = self.tmp / "missing.txt"
+        fake_result = {"path": str(target), "size": 4, "content": "done"}
+        with self.ask(
+            tool("write", path=str(target), content="done"),
+            "Le fichier a été créé avec succès.",
+        ) as ask, patch.object(self.agent, "execute_tool", return_value=fake_result):
+            answer = self.agent.respond({"messages": []}, "crée missing.txt")
+
+        self.assertEqual(
+            answer,
+            "Je n'ai pas pu confirmer que le contenu attendu est bien enregistré; je ne peux pas annoncer la création comme terminée.",
+        )
+        self.assertEqual(ask.call_count, 2)
+        self.assertIn('"verified":false', ask.call_args.args[0][-1]["content"])
+
+    def test_agent_writes_large_files_as_ordered_chunks(self):
+        target = self.tmp / "large.txt"
+        answers = [tool("write", path=str(target), content="part-0", append=False)]
+        answers.extend(
+            tool("write", path=str(target), content=f"|part-{index}", append=True)
+            for index in range(1, 7)
+        )
+        answers.append("Le fichier complet a été écrit en blocs.")
+        with self.ask(*answers) as ask:
+            answer = self.agent.respond(
+                {"messages": []}, "crée un très grand fichier large.txt"
+            )
+
+        self.assertEqual(answer, "Le fichier complet a été écrit en blocs.")
+        self.assertEqual(ask.call_count, 8)
+        self.assertEqual(target.read_text(encoding="utf-8"), "|".join(f"part-{i}" for i in range(7)))
+
     def test_chained_request_still_asks_the_model_after_the_tool(self):
         target = str(self.tmp / "note.txt")
         with self.ask(tool("write", path=target, content="a"), "Fichier créé, tout est prêt.") as ask:
@@ -263,10 +348,22 @@ class ToolLoopTest(ActionTestCase):
             tool("command", argv=[sys.executable, str(script)], cwd=str(self.tmp)),
             "Bug corrigé : le script affiche ok.",
         )
-        with self.ask(*answers) as ask:
-            answer = self.agent.respond({"messages": []}, "corrige le bug de app.py")
+        chat = {"messages": []}
+        done = {"command": [sys.executable, str(script)], "returncode": 0, "stdout": "ok\n", "stderr": ""}
+        with self.ask(*answers) as ask, patch(
+            "local_ia.tools.command.execute_argv", return_value=done
+        ) as execute:
+            answer = self.agent.respond(chat, "corrige le bug de app.py")
+            self.assertIn("Confirmation nécessaire", answer)
+            self.assertIn("pending_tool", chat)
+            answer = self.agent.respond(chat, "oui")
         self.assertEqual(ask.call_count, 4)
         self.assertEqual(answer, "Bug corrigé : le script affiche ok.")
+        execute.assert_called_once_with(
+            [sys.executable, str(script)],
+            timeout=command.DEFAULT_TIMEOUT,
+            cwd=str(self.tmp),
+        )
         self.assertEqual(script.read_text(), "print('ok')\n")
         last_tool_message = ask.call_args.args[0][-1]
         self.assertEqual(last_tool_message["role"], "tool")
@@ -277,8 +374,12 @@ class ToolLoopTest(ActionTestCase):
         script.write_text("x = 1\n", encoding="utf-8")
         with self.ask(tool("edit", path=str(script), old="absent", new="y"), "Je relis le fichier.") as ask:
             answer = self.agent.respond({"messages": []}, "corrige a.py")
-        self.assertEqual(answer, "Je relis le fichier.")
-        self.assertIn("introuvable", ask.call_args.args[0][-1]["content"])
+        self.assertEqual(
+            answer,
+            "Je n'ai pas pu confirmer la modification sur disque; je ne peux pas annoncer la correction comme terminée.",
+        )
+        self.assertIn("n'a pas abouti", ask.call_args.args[0][-1]["content"])
+        self.assertNotIn("introuvable", ask.call_args.args[0][-1]["content"])
 
     def test_model_repeating_itself_is_stopped(self):
         call = tool("list", path=str(self.tmp))
@@ -317,7 +418,8 @@ class ConfirmationTest(ActionTestCase):
         self.assertNotIn("pending_tool", chat)
 
     def test_harmless_command_needs_no_confirmation(self):
-        self.assertFalse(command.is_risky(["python3", "x.py"]))
+        self.assertFalse(command.is_risky(["echo", "hello"]))
+        self.assertTrue(command.is_risky(["python3", "x.py"]))
 
     def test_dangerous_commands_stay_risky_through_wrappers(self):
         wrapped_commands = (

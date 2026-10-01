@@ -47,6 +47,13 @@ class RequestRouterTest(unittest.TestCase):
         self.assertEqual(route["mode"], "tool")
         self.assertEqual(route["tools"], ("web",))
 
+    def test_arithmetic_questions_are_routed_to_calculator_tool(self):
+        for message in ("Combien font 12 / 3 ?", "calcule sqrt(81) + 2", "2 + 2"):
+            with self.subTest(message=message):
+                route = self.router.route(message, lambda *_: None)
+                self.assertEqual(route["mode"], "tool")
+                self.assertEqual(route["tools"], ("calculator",))
+
     def test_web_search_categories_are_routed_to_web_tool(self):
         for message in (
             "annonces vélo à Metz",
@@ -92,11 +99,22 @@ class ContextCompilerTest(unittest.TestCase):
         )
 
     def test_tool_manager_includes_only_requested_tools(self):
-        prompt = ToolManager.build_prompt({"file", "search"})
+        prompt = ToolManager.build_prompt({"file", "search", "write"})
         self.assertIn("file :", prompt)
         self.assertIn("search :", prompt)
+        self.assertIn("append:true", prompt)
+        self.assertIn("En cas de reprise", prompt)
         self.assertNotIn("command :", prompt)
         self.assertNotIn("system :", prompt)
+
+    def test_tool_manager_executes_calculator(self):
+        result = ToolManager.execute(
+            {"tool": "calculator", "arguments": {"expression": "sqrt(81) + 12 * 3"}},
+            {},
+            None,
+            allowed_tools={"calculator"},
+        )
+        self.assertEqual(result, {"expression": "sqrt(81) + 12 * 3", "result": 45.0})
 
     def test_empty_tool_selection_has_no_tool_prompt(self):
         self.assertEqual(ToolManager.build_prompt(set()), "")
@@ -109,7 +127,7 @@ class ContextCompilerTest(unittest.TestCase):
         route = {"mode": "agent", "tools": None}
         self.assertEqual(
             ToolManager.get_tools(route),
-            {"memory", "context", "file", "write", "edit", "list", "search", "launch", "command", "system", "web"},
+            {"memory", "context", "file", "write", "edit", "list", "search", "launch", "command", "system", "web", "open_page", "calculator"},
         )
 
     def test_validate_refuses_tools_outside_allowlist(self):

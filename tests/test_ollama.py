@@ -12,7 +12,14 @@ from unittest.mock import MagicMock, patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from local_ia.llm.ollama import OllamaSession, ask_ollama, key_usage_percent, openrouter_usage_status
+from local_ia.llm.ollama import (
+    OllamaSession,
+    ask_ollama,
+    get_openrouter_key_usage,
+    key_usage_percent,
+    openrouter_usage_status,
+)
+from local_ia.config.manager import openrouter_api_key, openrouter_api_keys
 
 
 class OllamaClientTest(unittest.TestCase):
@@ -29,6 +36,45 @@ class OllamaClientTest(unittest.TestCase):
         self.response_context = MagicMock()
         self.response_context.__enter__.return_value.read.return_value = b'{"message":{"content":"ok"}}'
 
+    def test_plaintext_config_api_key_is_not_used(self):
+        config = {"openrouter": {"api_key": "legacy-plaintext-key"}}
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(openrouter_api_key(config), "")
+
+    def test_runtime_key_pool_rotates_per_request_not_per_provider_check(self):
+        keys = ["key-one", "key-two", "key-three"]
+        with patch.dict("os.environ", {"LOCAL_IA_OPENROUTER_KEYS": json.dumps(keys)}, clear=True):
+            self.assertEqual(openrouter_api_keys(), keys)
+            self.assertEqual(openrouter_api_key(), "key-one")
+            self.assertEqual(
+                [openrouter_api_key(rotate=True) for _ in range(4)],
+                ["key-one", "key-two", "key-three", "key-one"],
+            )
+
+    def test_successive_openrouter_requests_use_different_pool_keys(self):
+        keys = ["task-key-alpha", "task-key-beta"]
+        config = {
+            "openrouter": {
+                "model": "openai/gpt-4o-mini",
+                "base_url": "https://openrouter.ai/api/v1",
+                "timeout": 30,
+            },
+        }
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = (
+            b'{"choices":[{"message":{"content":"ok"}}]}'
+        )
+        with patch.dict("os.environ", {"LOCAL_IA_OPENROUTER_KEYS": json.dumps(keys)}, clear=True), \
+             patch("local_ia.llm.ollama.load_config", return_value=config), \
+             patch("local_ia.llm.ollama.urlopen", return_value=response) as urlopen:
+            ask_ollama([{"role": "user", "content": "tâche 1"}])
+            ask_ollama([{"role": "user", "content": "tâche 2"}])
+
+        self.assertEqual(
+            [call.args[0].headers["Authorization"] for call in urlopen.call_args_list],
+            ["Bearer task-key-alpha", "Bearer task-key-beta"],
+        )
+
     def test_blank_model_uses_configured_model(self):
         with patch("local_ia.llm.ollama.load_config", return_value=self.config), patch(
             "local_ia.llm.ollama.urlopen", return_value=self.response_context
@@ -44,6 +90,16 @@ class OllamaClientTest(unittest.TestCase):
             ask_ollama([], model="test-model", timeout=0)
         self.assertEqual(urlopen.call_args.kwargs["timeout"], 5)
 
+    def test_requested_response_limit_is_forwarded_to_ollama(self):
+        with patch("local_ia.llm.ollama.load_config", return_value=self.config), patch(
+            "local_ia.llm.ollama.urlopen", return_value=self.response_context
+        ) as urlopen:
+            ask_ollama([], model="test-model", max_tokens=4096)
+
+        payload = json.loads(urlopen.call_args.args[0].data)
+        self.assertEqual(payload["options"]["num_predict"], 4096)
+
+    @patch.dict("os.environ", {"LOCAL_IA_OPENROUTER_KEY": "secret-key"})
     def test_openrouter_ignores_local_model_when_openrouter_model_is_missing(self):
         config = {
             "model": "llama3.2:3b",
@@ -63,6 +119,7 @@ class OllamaClientTest(unittest.TestCase):
         payload = json.loads(urlopen.call_args.args[0].data)
         self.assertEqual(payload["model"], "openai/gpt-4o-mini")
 
+    @patch.dict("os.environ", {"LOCAL_IA_OPENROUTER_KEY": "secret-key"})
     def test_openrouter_api_key_uses_openrouter_endpoint(self):
         config = {
             "model": "fallback-model",
@@ -82,12 +139,49 @@ class OllamaClientTest(unittest.TestCase):
         with patch("local_ia.llm.ollama.load_config", return_value=config), patch(
             "local_ia.llm.ollama.urlopen", return_value=response_context
         ) as urlopen:
-            self.assertEqual(ask_ollama([], model="  "), "bonjour depuis openrouter")
+            self.assertEqual(ask_ollama([], model="  ", max_tokens=4096), "bonjour depuis openrouter")
 
         self.assertIn("openrouter.ai/api/v1/chat/completions", urlopen.call_args.args[0].full_url)
         self.assertEqual(urlopen.call_args.args[0].headers["Authorization"], "Bearer secret-key")
         payload = json.loads(urlopen.call_args.args[0].data)
         self.assertEqual(payload["model"], "openai/gpt-4o-mini")
+        self.assertEqual(payload["max_tokens"], 4096)
+
+    def test_openrouter_key_usage_uses_active_runtime_key(self):
+        config = {
+            "openrouter": {
+                "api_key": "stored-key",
+                "base_url": "https://openrouter.ai/api/v1",
+            },
+        }
+        response_context = MagicMock()
+        response_context.__enter__.return_value.read.return_value = (
+            b'{"data":{"usage":1.25,"limit":10,"limit_remaining":8.75}}'
+        )
+
+        with patch.dict("os.environ", {"LOCAL_IA_OPENROUTER_KEY": "runtime-key"}), patch(
+            "local_ia.llm.ollama.load_config", return_value=config
+        ), patch("local_ia.llm.ollama.urlopen", return_value=response_context) as urlopen:
+            result = get_openrouter_key_usage()
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "https://openrouter.ai/api/v1/key")
+        self.assertEqual(request.headers["Authorization"], "Bearer runtime-key")
+        self.assertEqual(result["limit_remaining"], 8.75)
+
+    def test_openrouter_key_usage_can_query_a_selected_key(self):
+        config = {"openrouter": {"base_url": "https://openrouter.ai/api/v1"}}
+        response_context = MagicMock()
+        response_context.__enter__.return_value.read.return_value = b'{"data":{"usage":2.5}}'
+
+        with patch("local_ia.llm.ollama.load_config", return_value=config), patch(
+            "local_ia.llm.ollama.urlopen", return_value=response_context
+        ) as urlopen:
+            result = get_openrouter_key_usage(api_key="selected-key")
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.headers["Authorization"], "Bearer selected-key")
+        self.assertEqual(result["usage"], 2.5)
 
     def test_runtime_openrouter_key_overrides_stored_config(self):
         config = {
@@ -107,6 +201,7 @@ class OllamaClientTest(unittest.TestCase):
 
         self.assertEqual(urlopen.call_args.args[0].headers["Authorization"], "Bearer runtime-key")
 
+    @patch.dict("os.environ", {"LOCAL_IA_OPENROUTER_KEY": "secret-key"})
     def test_openrouter_uses_chunked_requests_under_2000_tokens(self):
         config = {
             "model": "fallback-model",
@@ -139,6 +234,7 @@ class OllamaClientTest(unittest.TestCase):
         self.assertIn("bloc reponse", response)
         self.assertGreaterEqual(len(urlopen.call_args_list), 2)
 
+    @patch.dict("os.environ", {"LOCAL_IA_OPENROUTER_KEY": "secret-key"})
     def test_openrouter_request_does_not_send_internal_usage_tracking_fields(self):
         config = {
             "model": "fallback-model",
@@ -168,6 +264,7 @@ class OllamaClientTest(unittest.TestCase):
         self.assertIn("messages", payload)
         self.assertIn("model", payload)
 
+    @patch.dict("os.environ", {"LOCAL_IA_OPENROUTER_KEY": "secret-key"})
     def test_openrouter_normalizes_nonstandard_messages_before_request(self):
         config = {
             "model": "fallback-model",

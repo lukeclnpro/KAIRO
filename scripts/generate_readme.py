@@ -26,11 +26,17 @@ def load_json(path: Path) -> dict:
 
 def version_tuple(version: str) -> tuple[int, ...]:
     values = re.findall(r"\d+", str(version).strip().lstrip("v"))
-    return tuple(int(value) for value in values) if values else (0, 0, 0)
+    if not values:
+        return (0, 0, 0, 0)
+    result = tuple(int(value) for value in values)
+    return result + (0,) * max(0, 4 - len(result))
 
 
 def render_version(data: dict) -> str:
     version = str(data.get("version", "0.0.0"))
+    patch = data.get("patch", 0)
+    if patch:
+        version = f"{version}.{patch}(beta{patch})"
     return f"{VERSION_START}\n**Version actuelle : `{version}`**\n{VERSION_END}"
 
 
@@ -76,7 +82,6 @@ def replace_section(text: str, start: str, end: str, replacement: str) -> str:
         pattern,
         replacement,
         text,
-        count=1,
         flags=re.DOTALL,
     )
 

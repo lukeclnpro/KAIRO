@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import time
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -36,7 +38,7 @@ class BenchmarkSuite:
         first_token_ms = None
         start = time.perf_counter()
 
-        def fake_ask_ollama(messages, model=None, stream=False):
+        def fake_ask_ollama(messages, model=None, timeout=None, stream=None, max_tokens=None):
             nonlocal ollama_calls, first_token_ms
             ollama_calls += 1
             if first_token_ms is None:
@@ -45,8 +47,21 @@ class BenchmarkSuite:
                 return responses.pop(0)
             return "Réponse benchmark." 
 
-        with patch("local_ia.core.agent.ask_ollama", side_effect=fake_ask_ollama):
-            answer = agent.respond(chat, question, allowed_tools=tools, stream=False)
+        with ExitStack() as resources:
+            if name in {"file_edit", "complex_tool_task"}:
+                temporary_root = Path(resources.enter_context(tempfile.TemporaryDirectory()))
+                projects_root = temporary_root / "projects"
+                project_root = projects_root / "benchmark"
+                project_root.mkdir(parents=True)
+                fixture = "avant" if name == "file_edit" else "TODO"
+                (project_root / "demo.txt").write_text(fixture, encoding="utf-8")
+                chat["code_project_path"] = str(project_root)
+                resources.enter_context(
+                    patch("local_ia.core.code_projects.get_projects_root", return_value=projects_root)
+                )
+
+            with patch("local_ia.core.agent.ask_ollama", side_effect=fake_ask_ollama):
+                answer = agent.respond(chat, question, allowed_tools=tools, stream=False)
 
         total_ms = int((time.perf_counter() - start) * 1000)
         prompt_chars = self._prompt_size(agent, chat, question, tools=tools, route=route)

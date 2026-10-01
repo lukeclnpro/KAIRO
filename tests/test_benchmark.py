@@ -9,6 +9,14 @@ class BenchmarkSuiteTest(unittest.TestCase):
 
         self.assertIn("scenarios", report)
         self.assertTrue(report["scenarios"])
+        self.assertEqual(
+            report["scenarios"]["file_edit"]["answer"],
+            "Fichier modifié avec succès.",
+        )
+        self.assertEqual(
+            report["scenarios"]["complex_tool_task"]["answer"],
+            "La tâche est terminée.",
+        )
 
         for name, result in report["scenarios"].items():
             self.assertIn("first_token_ms", result)

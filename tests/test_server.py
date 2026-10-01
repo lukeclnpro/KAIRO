@@ -7,7 +7,11 @@ import sys
 import tempfile
 import threading
 import unittest
+import base64
+import http.client
+import json
 from concurrent.futures import ThreadPoolExecutor
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -79,7 +83,7 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(message, "lis app.py\n\nextrait du fichier")
         self.assertEqual(
             session["agent"].respond.call_args.kwargs["allowed_tools"],
-            {"memory", "context", "file", "write", "edit", "list", "search", "web", "launch"},
+            {"memory", "context", "file", "write", "edit", "list", "search", "web", "launch", "open_page"},
         )
         self.assertNotIn("command", session["agent"].respond.call_args.kwargs["allowed_tools"])
         self.assertNotIn("system", session["agent"].respond.call_args.kwargs["allowed_tools"])
@@ -98,6 +102,85 @@ class ServerTest(unittest.TestCase):
 
     def test_network_urls_contains_localhost(self):
         self.assertIn("http://127.0.0.1:8080", server.network_urls(8080))
+
+    def test_server_authenticates_remote_bind_with_constant_time_token_check(self):
+        self.assertTrue(server.is_loopback_host("127.0.0.1"))
+        self.assertFalse(server.is_loopback_host("0.0.0.0"))
+
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        httpd.auth_token = "a" * 32
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(httpd.server_close)
+        self.addCleanup(httpd.shutdown)
+        self.addCleanup(thread.join, 2)
+
+        connection = http.client.HTTPConnection("127.0.0.1", httpd.server_port)
+        self.addCleanup(connection.close)
+        connection.request("GET", "/app.js")
+        response = connection.getresponse()
+        self.assertEqual(response.status, 401)
+        response.read()
+
+        credentials = base64.b64encode(b"kairo:" + b"a" * 32).decode("ascii")
+        connection.request("GET", "/app.js", headers={"Authorization": f"Basic {credentials}"})
+        response = connection.getresponse()
+        self.assertEqual(response.status, 200)
+        response.read()
+
+    def test_remote_client_cannot_execute_direct_command(self):
+        handler = object.__new__(server.Handler)
+        with patch.object(server.Handler, "_is_local_client", return_value=False), \
+             patch.object(server.command_commands, "execute_command") as execute:
+            result = handler._execute_local_command("python -c pass", {})
+
+        self.assertIsNone(result)
+        execute.assert_not_called()
+
+    def test_post_route_table_dispatches_chat_lifecycle_and_chat_message(self):
+        chat = {"id": 77, "messages": []}
+        httpd = server.KairoHTTPServer(("127.0.0.1", 0), server.Handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(httpd.server_close)
+        self.addCleanup(httpd.shutdown)
+        self.addCleanup(thread.join, 2)
+
+        connection = http.client.HTTPConnection("127.0.0.1", httpd.server_port)
+        self.addCleanup(connection.close)
+        headers = {"Content-Type": "application/json"}
+        with patch.object(server, "create_chat", return_value=chat) as create_chat, \
+             patch.object(server, "chat_agent") as chat_agent, \
+             patch.object(server, "close_chat_agent") as close_chat_agent:
+            connection.request("POST", "/api/chats/new", body="{}", headers=headers)
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(json.loads(response.read())["chat"]["id"], 77)
+
+            connection.request("POST", "/api/chats/77/close", body="{}", headers=headers)
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertTrue(json.loads(response.read())["ok"])
+
+        create_chat.assert_called_once_with()
+        chat_agent.assert_called_once_with(chat)
+        close_chat_agent.assert_called_once_with("77")
+
+        with patch.object(server, "get_chat", return_value=chat), \
+             patch.object(server, "command_execution_config", return_value={}), \
+             patch.object(server.program_commands, "execute_command", return_value=None), \
+             patch.object(server.Handler, "_execute_local_command", return_value=None), \
+             patch.object(server, "model_from_config", return_value="test-model"), \
+             patch.object(server, "installed_models", return_value={"models": [{"name": "test-model"}]}), \
+             patch.object(server.file_commands, "execute_command", return_value=None), \
+             patch.object(server, "chat_agent", return_value=object()), \
+             patch.object(server, "chat_with_model", return_value="Réponse de test"), \
+             patch.object(server, "save_chat"):
+            payload = json.dumps({"chat_id": 77, "message": "Bonjour"})
+            connection.request("POST", "/api/chat", body=payload, headers=headers)
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(json.loads(response.read())["answer"], "Réponse de test")
 
 
 if __name__ == "__main__":

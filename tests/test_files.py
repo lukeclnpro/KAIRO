@@ -33,6 +33,32 @@ class FileCommandsTest(unittest.TestCase):
         self.assertEqual(loaded["content"], "bonjour")
         self.assertEqual(loaded["kind"], "text")
 
+    def test_appended_chunks_can_grow_beyond_the_single_write_limit(self):
+        path = Path(self.directory.name) / "large.txt"
+        block = "x" * (file_commands.MAX_WRITE_BYTES // 2 + 1)
+        file_commands.write_file(str(path), block)
+        result = file_commands.append_file(str(path), block)
+
+        self.assertGreater(result["size"], file_commands.MAX_WRITE_BYTES)
+        self.assertEqual(result["appended_size"], len(block.encode("utf-8")))
+        self.assertEqual(path.stat().st_size, len((block + block).encode("utf-8")))
+        self.assertEqual(path.read_text(encoding="utf-8"), block + block)
+
+    def test_append_rejects_paths_outside_allowed_root(self):
+        with self.assertRaises(PermissionError):
+            file_commands.append_file(str(Path(tempfile.gettempdir()) / "outside.txt"), "blocked")
+
+    def test_append_rejects_an_oversized_block_without_changing_the_file(self):
+        path = Path(self.directory.name) / "large.txt"
+        file_commands.write_file(str(path), "original")
+
+        with self.assertRaises(ValueError):
+            file_commands.append_file(
+                str(path), "x" * (file_commands.MAX_WRITE_BYTES + 1)
+            )
+
+        self.assertEqual(path.read_text(encoding="utf-8"), "original")
+
     def test_utf8_bom_is_removed_from_decoded_text(self):
         path = Path(self.directory.name) / "bom.txt"
         path.write_bytes(b"\xef\xbb\xbftexte\n")
