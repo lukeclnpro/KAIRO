@@ -1,13 +1,13 @@
-# 🤖 Local IA
+# ◈ KAIRO
 
-> Une interface locale pour utiliser des modèles d'IA directement depuis votre machine, avec une intégration **Ollama optionnelle**.
+> IA locale, esprit libre. Un assistant personnel extensible avec Ollama optionnel et accès OpenRouter.
 
 <!-- VERSION:START -->
 **Version actuelle : `0.2.0`**
 <!-- VERSION:END -->
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![License](https://img.shields.io/github/license/lukeclnpro/local_ia)](https://github.com/lukeclnpro/local_ia)
+[![License](https://img.shields.io/github/license/lukeclnpro/KAIRO)](https://github.com/lukeclnpro/KAIRO)
 
 ## ✨ Fonctionnalités
 
@@ -27,13 +27,17 @@
 
 > **Important :** l'installation de Local IA **n'installe pas Ollama automatiquement**. Si vous n'utilisez pas Ollama, aucune installation supplémentaire n'est nécessaire de ce côté.
 
+## Licence
+
+Le code de KAIRO est distribué sous licence MIT : voir [LICENSE](LICENSE). Les licences des dépendances sont recensées dans [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## 🚀 Installation
 
 ### Linux
 
 ```bash
-git clone https://github.com/lukeclnpro/local_ia.git
-cd local_ia
+git clone https://github.com/lukeclnpro/KAIRO.git
+cd KAIRO
 python3 setup.py
 ```
 
@@ -43,8 +47,8 @@ python3 setup.py
 
 ```powershell
 cd $HOME/Documents
-git clone https://github.com/lukeclnpro/local_ia.git
-cd local_ia
+git clone https://github.com/lukeclnpro/KAIRO.git
+cd KAIRO
 python setup.py
 ```
 
@@ -55,14 +59,14 @@ python setup.py
 ### Linux
 
 ```bash
-cd local_ia
+cd KAIRO
 python3 main.py
 ```
 
 ### Windows
 
 ```powershell
-cd $HOME/Documents/local_ia
+cd $HOME/Documents/KAIRO
 python main.py
 ```
 
@@ -226,7 +230,7 @@ Le contenu ci-dessous est **généré automatiquement** à partir de ces deux fi
 - Ajout d'un serveur local qui permet a tout les membres du reseau de discuter avec l'ia.
 - Correctif des premiers bug et test du server local
 - debut de la creation d'un portage executable du programme
-- IMPORTANT : un possible bug du programme sur le serveur est possible pour les personnes ayant deja telecharger les anciennes version du programme, nous vous conseillons donc de supprimer le programme et de refaire une installation propre depuis le depot github (https://github.com/lukeclnpro/local_ia)
+- IMPORTANT : un possible bug du programme sur le serveur est possible pour les personnes ayant deja telecharger les anciennes version du programme, nous vous conseillons donc de supprimer le programme et de refaire une installation propre depuis le depot github (https://github.com/lukeclnpro/KAIRO)
 
 </details>
 
@@ -267,21 +271,21 @@ Après la mise à jour, exécutez :
 ### Linux
 
 ```bash
-cd local_ia
+cd KAIRO
 python3 main.py force_update
 ```
 
 ### Windows
 
 ```powershell
-cd $HOME/Documents/local_ia
+cd $HOME/Documents/KAIRO
 python main.py force_update
 ```
 
 ## 📁 Structure du projet
 
 ```text
-local_ia/
+KAIRO/
 ├── main.py                 # Programme principal
 ├── server.py               # Serveur web local
 ├── local_ia/               # Package de l'agent IA
