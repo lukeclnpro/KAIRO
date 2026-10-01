@@ -1,7 +1,39 @@
-from .files import *
-from .commands import *
-from .programs import *
-from .applications import *
+from . import (
+	applications,
+	browser,
+	calculator,
+	command,
+	commands,
+	context,
+	edit,
+	file,
+	files,
+	launch,
+	listing,
+	memory,
+	programs,
+	search,
+	system,
+	web,
+	write,
+)
 
-from . import command, context, edit, file, launch, listing, memory, search, write
-from . import system
+__all__ = (
+	"applications",
+	"browser",
+	"calculator",
+	"command",
+	"commands",
+	"context",
+	"edit",
+	"file",
+	"files",
+	"launch",
+	"listing",
+	"memory",
+	"programs",
+	"search",
+	"system",
+	"web",
+	"write",
+)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from local_ia.core.context import build_system_prompt
+from local_ia.core.conversation import get_weighted_chat_history
 from local_ia.core.tool_manager import ToolManager
 
 _WORDS = re.compile(r"[^\W_]+", re.UNICODE)
@@ -53,7 +54,7 @@ class ContextCompiler:
         if summary:
             blocks.append(("SUMMARY", summary))
 
-        history = chat.get("messages", []) or []
+        history = get_weighted_chat_history(chat)
         if history:
             recent = history[-4:]
             recent_text = "\n".join(
@@ -61,7 +62,11 @@ class ContextCompiler:
                 for entry in recent if str(entry.get('content', '')).strip()
             )
             if recent_text:
-                blocks.append(("HISTORY", recent_text))
+                history_guidance = (
+                    "Les pourcentages indiquent l'importance des messages précédents : "
+                    "100 % pour le plus récent, puis une décroissance de 25 % à chaque message."
+                )
+                blocks.append(("HISTORY", f"{history_guidance}\n{recent_text}"))
 
         if message_text and memory_items:
             blocks.append(("MEMORY", "\n".join(memory_items)))

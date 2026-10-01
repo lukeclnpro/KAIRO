@@ -204,7 +204,7 @@ def remove_models():
     for model in selected:
         print(f"\n[SUPPRESSION] {model}")
 
-        code, stdout, stderr = run_command(
+        code, _, stderr = run_command(
             [ollama, "rm", model]
         )
 

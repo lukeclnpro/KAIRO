@@ -10,7 +10,8 @@ import threading
 from datetime import datetime
 from pathlib import Path
 from queue import Queue
-from urllib.request import Request, urlopen
+from urllib.error import HTTPError
+from local_ia.http_client import Request, open_url as urlopen
 
 from local_ia.config.manager import load_config, ollama_base_url
 
@@ -62,13 +63,23 @@ def _cosine_similarity(a, b):
     return dot / (norm_a * norm_b)
 
 
+def _embedding_model_name():
+    config = load_config()
+    ollama_config = config.get("ollama", {})
+    if not isinstance(ollama_config, dict):
+        ollama_config = {}
+    return str(
+        config.get("embedding_model")
+        or ollama_config.get("embedding_model")
+        or _DEFAULT_EMBEDDING_MODEL
+    ).strip()
+
+
 def compute_embedding(text, model=None, timeout=None):
     value = str(text or "").strip()
     if not value:
         return []
-    selected_model = str(model or "").strip() or str(
-        load_config().get("embedding_model") or load_config().get("ollama", {}).get("embedding_model") or _DEFAULT_EMBEDDING_MODEL
-    ).strip()
+    selected_model = str(model or "").strip() or _embedding_model_name()
     cache_key = (selected_model, value)
     if cache_key in _EMBEDDING_CACHE:
         return _EMBEDDING_CACHE[cache_key]
@@ -94,6 +105,8 @@ def compute_embedding(text, model=None, timeout=None):
             vector = [float(number) for number in embedding]
             _EMBEDDING_CACHE[cache_key] = vector
             return vector
+    except HTTPError as error:
+        error.close()
     except Exception:
         pass
 
@@ -108,9 +121,14 @@ def init_database(path: Path | None = None):
     conn = sqlite3.connect(target, check_same_thread=False)
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id TEXT, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS memories (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT NOT NULL, created_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS memories (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT NOT NULL, created_at TEXT NOT NULL, embedding TEXT, embedding_model TEXT);
         CREATE TABLE IF NOT EXISTS topics (id INTEGER PRIMARY KEY AUTOINCREMENT, topic TEXT NOT NULL, created_at TEXT NOT NULL);
     """)
+    memory_columns = {row[1] for row in conn.execute("PRAGMA table_info(memories)")}
+    if "embedding" not in memory_columns:
+        conn.execute("ALTER TABLE memories ADD COLUMN embedding TEXT")
+    if "embedding_model" not in memory_columns:
+        conn.execute("ALTER TABLE memories ADD COLUMN embedding_model TEXT")
     conn.commit()
     return conn
 
@@ -144,12 +162,40 @@ def flush_memory_writes():
 
 
 def save_memory(conn, content, async_mode=True):
+    def write_memory():
+        model = _embedding_model_name()
+        embedding = json.dumps(compute_embedding(content, model=model), separators=(",", ":"))
+        conn.execute(
+            "INSERT INTO memories (content, created_at, embedding, embedding_model) VALUES (?, ?, ?, ?)",
+            (content, datetime.now().isoformat(), embedding, model),
+        )
+        conn.commit()
+
     if async_mode:
         _ensure_memory_writer()
-        _MEMORY_QUEUE.put(lambda: conn.execute("INSERT INTO memories (content, created_at) VALUES (?, ?)", (content, datetime.now().isoformat())) and conn.commit())
+        _MEMORY_QUEUE.put(write_memory)
         return
-    conn.execute("INSERT INTO memories (content, created_at) VALUES (?, ?)", (content, datetime.now().isoformat()))
+    write_memory()
+
+
+def list_memories(conn):
+    flush_memory_writes()
+    rows = conn.execute("SELECT id, content FROM memories ORDER BY id DESC").fetchall()
+    return [{"id": row[0], "content": row[1]} for row in rows]
+
+
+def delete_memory(conn, memory_id):
+    flush_memory_writes()
+    cursor = conn.execute("DELETE FROM memories WHERE id = ?", (int(memory_id),))
     conn.commit()
+    return cursor.rowcount == 1
+
+
+def clear_memories(conn):
+    flush_memory_writes()
+    cursor = conn.execute("DELETE FROM memories")
+    conn.commit()
+    return cursor.rowcount
 
 
 def _memory_similarity(a, b):
@@ -211,8 +257,10 @@ def get_memories(conn, limit=MAX_MEMORIES, query=None):
     limit = max(0, int(limit))
     if limit == 0:
         return []
-    rows = conn.execute("SELECT content FROM memories ORDER BY id DESC").fetchall()
-    memories = [row[0] for row in rows]
+    rows = conn.execute(
+        "SELECT id, content, embedding, embedding_model FROM memories ORDER BY id DESC"
+    ).fetchall()
+    memories = [row[1] for row in rows]
     if query is None:
         return memories[:limit]
 
@@ -220,12 +268,26 @@ def get_memories(conn, limit=MAX_MEMORIES, query=None):
     if not query_terms:
         return memories[:limit]
 
-    query_embedding = compute_embedding(query)
+    selected_model = _embedding_model_name()
+    query_embedding = compute_embedding(query, model=selected_model)
     ranked = []
-    for index, item in enumerate(memories):
+    for index, (memory_id, item, stored_embedding, stored_model) in enumerate(rows):
         lexical_score = len(query_terms & _terms(item))
         semantic_score = 0.0
-        item_embedding = compute_embedding(item)
+        item_embedding = None
+        if stored_embedding and stored_model == selected_model:
+            try:
+                parsed_embedding = json.loads(stored_embedding)
+                if isinstance(parsed_embedding, list):
+                    item_embedding = [float(number) for number in parsed_embedding]
+            except (TypeError, ValueError):
+                item_embedding = None
+        if item_embedding is None:
+            item_embedding = compute_embedding(item, model=selected_model)
+            conn.execute(
+                "UPDATE memories SET embedding = ?, embedding_model = ? WHERE id = ?",
+                (json.dumps(item_embedding, separators=(",", ":")), selected_model, memory_id),
+            )
         if query_embedding and item_embedding:
             semantic_score = _cosine_similarity(query_embedding, item_embedding)
         total_score = lexical_score * 2.5 + semantic_score * 5.0
@@ -243,6 +305,7 @@ def get_memories(conn, limit=MAX_MEMORIES, query=None):
                     seen.add(item)
                 if len(selected) >= limit:
                     break
+            conn.commit()
         return selected
 
     selected = []
@@ -254,6 +317,7 @@ def get_memories(conn, limit=MAX_MEMORIES, query=None):
         seen.add(item)
         if len(selected) >= limit:
             break
+    conn.commit()
     return selected
 
 

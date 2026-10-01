@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import json
 import threading
-from typing import Iterator
 from urllib.error import HTTPError
-from urllib.request import Request, urlopen
+from local_ia.http_client import Request, open_url as urlopen
 
 from local_ia.config.manager import (
     load_config,
@@ -222,6 +221,27 @@ def _openrouter_model_or_none(model):
     return None
 
 
+def get_openrouter_key_usage(timeout=10, api_key=None):
+    """Retourne les informations d'utilisation de la clé OpenRouter choisie ou active."""
+    config = load_config()
+    api_key = str(api_key or openrouter_api_key(config)).strip()
+    if not api_key:
+        raise ValueError("Aucune clé API OpenRouter n'est configurée pour cette session.")
+
+    request = Request(
+        openrouter_base_url(config) + "/key",
+        headers={"Authorization": f"Bearer {api_key}"},
+        method="GET",
+    )
+    with urlopen(request, timeout=max(5, int(timeout))) as response:
+        result = json.loads(response.read().decode("utf-8"))
+
+    data = result.get("data") if isinstance(result, dict) else None
+    if not isinstance(data, dict):
+        raise ValueError("Réponse d'utilisation OpenRouter invalide.")
+    return data
+
+
 class OllamaSession:
     """Session unique pour les appels Ollama avec keep_alive centralisé."""
 
@@ -267,16 +287,21 @@ class OllamaSession:
             "model": selected_model,
         }
 
-    def generate(self, messages, model=None, timeout=None, stream=None):
+    def generate(self, messages, model=None, timeout=None, stream=None, max_tokens=None):
         config = load_config()
         if stream is None:
             stream = bool(config.get("ollama", {}).get("stream", False)) if isinstance(config.get("ollama", {}), dict) else False
         if openrouter_api_key(config):
-            text = ask_openrouter(messages, model=_openrouter_model_or_none(model), timeout=timeout)
+            text = ask_openrouter(
+                messages,
+                model=_openrouter_model_or_none(model),
+                timeout=timeout,
+                max_tokens=max_tokens,
+            )
             return text if not stream else [text]
 
         if stream:
-            return list(self.stream(messages, model=model, timeout=timeout))
+            return list(self.stream(messages, model=model, timeout=timeout, max_tokens=max_tokens))
 
         messages = _limit_messages_to_budget(messages, MAX_CONTEXT_TOKENS)
         settings = self._request_settings(model=model, timeout=timeout, stream=False)
@@ -286,6 +311,8 @@ class OllamaSession:
             "stream": False,
             "keep_alive": settings["keep_alive"],
         }
+        if max_tokens is not None:
+            payload["options"] = {"num_predict": max(1, int(max_tokens))}
         request = Request(
             settings["base_url"] + "/api/chat",
             data=json.dumps(payload).encode("utf-8"),
@@ -296,10 +323,15 @@ class OllamaSession:
             result = json.loads(response.read().decode("utf-8"))
         return result.get("message", {}).get("content", "").strip()
 
-    def stream(self, messages, model=None, timeout=None):
+    def stream(self, messages, model=None, timeout=None, max_tokens=None):
         config = load_config()
         if openrouter_api_key(config):
-            text = ask_openrouter(messages, model=_openrouter_model_or_none(model), timeout=timeout)
+            text = ask_openrouter(
+                messages,
+                model=_openrouter_model_or_none(model),
+                timeout=timeout,
+                max_tokens=max_tokens,
+            )
             if text:
                 yield text
             return
@@ -311,6 +343,8 @@ class OllamaSession:
             "stream": True,
             "keep_alive": settings["keep_alive"],
         }
+        if max_tokens is not None:
+            payload["options"] = {"num_predict": max(1, int(max_tokens))}
         request = Request(
             settings["base_url"] + "/api/chat",
             data=json.dumps(payload).encode("utf-8"),
@@ -386,11 +420,11 @@ def _openrouter_content(result):
     return str(content or "").strip()
 
 
-def _request_openrouter_once(messages, model=None, timeout=None):
+def _request_openrouter_once(messages, model=None, timeout=None, max_tokens=None):
     config = load_config()
-    api_key = openrouter_api_key(config)
+    api_key = openrouter_api_key(config, rotate=True)
     if not api_key:
-        raise ValueError("Clé API OpenRouter absente. Configurez openrouter.api_key dans config.json.")
+        raise ValueError("Clé API OpenRouter absente. Connectez-vous à un compte local depuis le menu.")
 
     nested = config.get("openrouter", {}) if isinstance(config.get("openrouter", {}), dict) else {}
     explicit_model = str(model or "").strip()
@@ -439,11 +473,12 @@ def _request_openrouter_once(messages, model=None, timeout=None):
         message = f"OpenRouter HTTP {exc.code} : {detail}" if detail else f"OpenRouter HTTP {exc.code} : {exc.reason}"
         return ValueError(message)
 
+    response_limit = MAX_RESPONSE_TOKENS if max_tokens is None else max_tokens
     payload = {
         "model": selected_model,
         "messages": cleaned_messages,
         "stream": False,
-        "max_tokens": min(1024, max(256, MAX_RESPONSE_TOKENS)),
+        "max_tokens": min(4096, max(256, int(response_limit))),
     }
 
     try:
@@ -463,29 +498,33 @@ def _request_openrouter_once(messages, model=None, timeout=None):
     return _openrouter_content(result)
 
 
-def ask_openrouter(messages, model=None, timeout=None):
+def ask_openrouter(messages, model=None, timeout=None, max_tokens=None):
     chunks = _split_messages_for_queue(messages, MAX_CONTEXT_TOKENS)
     if len(chunks) == 1:
-        return _request_openrouter_once(chunks[0], model=model, timeout=timeout)
+        return _request_openrouter_once(chunks[0], model=model, timeout=timeout, max_tokens=max_tokens)
 
     with _REQUEST_QUEUE_LOCK:
         parts = []
         for chunk in chunks:
-            parts.append(_request_openrouter_once(chunk, model=model, timeout=timeout))
+            parts.append(_request_openrouter_once(chunk, model=model, timeout=timeout, max_tokens=max_tokens))
     return _merge_chunk_responses(parts)
 
 
-def ask_ollama(messages, model=None, timeout=None, stream=None):
+def ask_ollama(messages, model=None, timeout=None, stream=None, max_tokens=None):
     if stream is None:
         config = load_config()
         stream = bool(config.get("ollama", {}).get("stream", False)) if isinstance(config.get("ollama", {}), dict) else False
     if stream:
-        return OllamaSession.get_instance().stream(messages, model=model, timeout=timeout)
-    return OllamaSession.get_instance().generate(messages, model=model, timeout=timeout)
+        return OllamaSession.get_instance().stream(
+            messages, model=model, timeout=timeout, max_tokens=max_tokens
+        )
+    return OllamaSession.get_instance().generate(
+        messages, model=model, timeout=timeout, max_tokens=max_tokens
+    )
 
 
-def ask(messages, model=None, timeout=None, stream=None):
-    return ask_ollama(messages, model=model, timeout=timeout, stream=stream)
+def ask(messages, model=None, timeout=None, stream=None, max_tokens=None):
+    return ask_ollama(messages, model=model, timeout=timeout, stream=stream, max_tokens=max_tokens)
 
 
 def installed_models():

@@ -9,6 +9,7 @@ transformé en fichier invalide.
 from __future__ import annotations
 
 import ast
+import hashlib
 import shutil
 import time
 from uuid import uuid4
@@ -21,13 +22,14 @@ from local_ia.tools.file import _allow_standard_directories, normalize_path
 BACKUP_DIR = BASE_DIR / ".local_ia_backups"
 
 
-def backup_file(path):
+def backup_file(path, backup_dir=None):
     """Copie le fichier existant dans .local_ia_backups/. Retourne la copie ou None."""
     source = Path(path).expanduser()
     if not source.is_file():
         return None
-    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    target = BACKUP_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid4().hex}-{source.name}"
+    target_directory = Path(backup_dir) if backup_dir else BACKUP_DIR
+    target_directory.mkdir(parents=True, exist_ok=True)
+    target = target_directory / f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid4().hex}-{source.name}"
     try:
         shutil.copy2(source, target)
     except Exception:
@@ -44,14 +46,16 @@ def _python_is_valid(source):
         return False
 
 
-def use(path, old, new, replace_all=False):
+def use(path, old, new, replace_all=False, allowed_roots=None):
     if not isinstance(old, str) or old == "":
         raise ValueError("Le texte à remplacer (old) est vide.")
     if not isinstance(new, str):
         raise ValueError("Le nouveau texte (new) est manquant.")
 
-    _allow_standard_directories()
-    target = file_commands._resolve(normalize_path(path))
+    if allowed_roots is None:
+        _allow_standard_directories()
+        path = normalize_path(path)
+    target = file_commands._resolve(path, allowed_roots)
     if not target.is_file():
         raise FileNotFoundError(f"Fichier introuvable : {target}")
 
@@ -83,11 +87,16 @@ def use(path, old, new, replace_all=False):
         if not syntax_ok and _python_is_valid(text):
             raise ValueError("Modification refusée : elle introduirait une erreur de syntaxe Python.")
 
-    backup = backup_file(target)
+    backup_dir = Path(allowed_roots[0]) / ".local_ia_backups" if allowed_roots else None
+    backup = backup_file(target, backup_dir)
     target.write_bytes(raw)
+    persisted = target.read_bytes()
+    if persisted != raw:
+        raise OSError("La modification écrite ne correspond pas au contenu attendu.")
     return {
         "path": str(target),
         "replacements": found if replace_all else 1,
         "backup": backup,
         "syntax_ok": syntax_ok,
+        "verified_sha256": hashlib.sha256(persisted).hexdigest(),
     }

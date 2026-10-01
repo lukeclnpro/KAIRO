@@ -11,7 +11,8 @@ Syntaxes supportées :
 
 Les chemins sont résolus localement sur la machine qui exécute le serveur.
 Par défaut, la taille des fichiers lus/écrits est limitée pour éviter
-qu'un seul fichier ne remplisse le contexte ou le disque.
+qu'un seul appel ne remplisse le contexte ou le disque. La limite d'écriture
+s'applique à chaque bloc; les ajouts successifs n'ont pas de plafond cumulé.
 """
 
 from __future__ import annotations
@@ -62,15 +63,19 @@ def _clean(value: str) -> str:
     return value.strip()
 
 
-def _resolve(path_text: str) -> Path:
+def _resolve(path_text: str, allowed_roots=None) -> Path:
     path_text = os.path.expandvars(os.path.expanduser(_clean(path_text)))
     p = Path(path_text)
     if not p.is_absolute():
         p = BASE_DIR / p
     p = p.resolve()
-    if not _is_allowed(p):
-        roots = ", ".join(str(x) for x in FILE_ACCESS_ROOTS)
-        raise PermissionError(f"Accès refusé. Le chemin doit être dans : {roots}")
+    if allowed_roots is None:
+        roots = FILE_ACCESS_ROOTS
+    else:
+        roots = [Path(root).expanduser().resolve() for root in allowed_roots]
+    if not any(p == root or root in p.parents for root in roots):
+        root_names = ", ".join(str(root) for root in roots)
+        raise PermissionError(f"Accès refusé. Le chemin doit être dans : {root_names}")
     return p
 
 
@@ -94,8 +99,8 @@ def _read_text(path: Path) -> str:
     raise ValueError("Le fichier n'est pas un fichier texte lisible.")
 
 
-def read_file(path_text: str, explicit_extension: Optional[str] = None) -> dict:
-    path = _resolve(path_text)
+def read_file(path_text: str, explicit_extension: Optional[str] = None, allowed_roots=None) -> dict:
+    path = _resolve(path_text, allowed_roots)
     if not path.exists():
         raise FileNotFoundError(f"Fichier introuvable : {path}")
     if not path.is_file():
@@ -130,8 +135,8 @@ def read_file(path_text: str, explicit_extension: Optional[str] = None) -> dict:
     }
 
 
-def write_file(path_text: str, content: str, explicit_extension: Optional[str] = None) -> dict:
-    path = _resolve(path_text)
+def write_file(path_text: str, content: str, explicit_extension: Optional[str] = None, allowed_roots=None) -> dict:
+    path = _resolve(path_text, allowed_roots)
     content = str(content)
     raw = content.encode("utf-8")
     if len(raw) > MAX_WRITE_BYTES:
@@ -143,6 +148,24 @@ def write_file(path_text: str, content: str, explicit_extension: Optional[str] =
         "extension": _extension(path, explicit_extension),
         "size": len(raw),
         "content": content,
+    }
+
+
+def append_file(path_text: str, content: str, explicit_extension: Optional[str] = None, allowed_roots=None) -> dict:
+    """Ajoute un bloc UTF-8; la limite porte sur ce bloc, pas sur le fichier final."""
+    path = _resolve(path_text, allowed_roots)
+    raw = str(content).encode("utf-8")
+    if len(raw) > MAX_WRITE_BYTES:
+        raise ValueError(f"Bloc trop volumineux ({len(raw)} octets, maximum {MAX_WRITE_BYTES}).")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("ab") as output:
+        output.write(raw)
+    return {
+        "path": str(path),
+        "extension": _extension(path, explicit_extension),
+        "size": path.stat().st_size,
+        "appended_size": len(raw),
+        "appended": True,
     }
 
 
@@ -172,7 +195,6 @@ def extract_creation_content(message: str, command: dict) -> str:
     lines = message.splitlines()
     if not lines:
         return ""
-    first = lines[0]
     return "\n".join(lines[1:])
 
 

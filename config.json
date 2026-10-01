@@ -1,5 +1,19 @@
 {
     "model": "llama3.2:3b",
+    "ollama": {
+        "url": "http://localhost:11434",
+        "model": "",
+        "timeout": 120,
+        "stream": false,
+        "keep_alive": "30m"
+    },
+    "openrouter": {
+        "model": "openai/gpt-4o-mini",
+        "base_url": "https://openrouter.ai/api/v1",
+        "timeout": 120,
+        "site_url": "",
+        "app_name": "Local IA"
+    },
     "utilisateur": {
         "langue": "français",
         "nom": "utilisateur"
@@ -26,20 +40,6 @@
         "adapter_au_sujet": true
     },
     "instructions": [],
-    "ollama": {
-        "url": "http://localhost:11434",
-        "model": "",
-        "timeout": 120,
-        "stream": false
-    },
-    "openrouter": {
-        "api_key": "",
-        "model": "openai/gpt-4o-mini",
-        "base_url": "https://openrouter.ai/api/v1",
-        "timeout": 120,
-        "site_url": "",
-        "app_name": "Local IA"
-    },
     "command_execution": {
         "enabled": false,
         "timeout": 30

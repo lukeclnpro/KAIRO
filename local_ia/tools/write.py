@@ -2,13 +2,16 @@
 
 from pathlib import Path
 
-from file_commands import write_file
+from file_commands import append_file, write_file
 from local_ia.tools.file import _allow_standard_directories, normalize_path
 
 
-def use(path, content, extension=None):
-    _allow_standard_directories()
-    normalized_path = normalize_path(path)
+def use(path, content, extension=None, allowed_roots=None, append=False):
+    if allowed_roots is None:
+        _allow_standard_directories()
+        path = normalize_path(path)
+    normalized_path = path
     if extension and not Path(normalized_path).suffix:
         normalized_path += "." + str(extension).lstrip(".")
-    return write_file(normalized_path, content, extension)
+    writer = append_file if append else write_file
+    return writer(normalized_path, content, extension, allowed_roots)

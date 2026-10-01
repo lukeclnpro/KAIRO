@@ -5,8 +5,8 @@ import shlex
 
 from command_commands import DEFAULT_TIMEOUT, execute_argv
 
-# Programmes qui détruisent, arrêtent ou modifient le système : ils demandent
-# une confirmation explicite de l'utilisateur avant de s'exécuter.
+# Toute commande qui n'est pas explicitement reconnue comme une simple lecture
+# demande confirmation. Cette liste reste volontairement conservatrice.
 RISKY_PROGRAMS = {
     "rm", "rmdir", "shred", "truncate", "del", "erase", "rd", "format",
     "sudo", "su", "doas", "dd", "fdisk", "parted", "mkswap",
@@ -14,8 +14,14 @@ RISKY_PROGRAMS = {
     "kill", "killall", "pkill", "taskkill",
     "chmod", "chown",
 }
+READ_ONLY_PROGRAMS = {
+    "cat", "date", "df", "dir", "du", "echo", "file", "free", "grep",
+    "head", "id", "ls", "more", "nproc", "pgrep", "ps", "pwd", "rg",
+    "stat", "tail", "uname", "uptime", "users", "wc", "which", "who",
+    "whoami", "where", "whereis",
+}
 SHELLS = {"sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "cmd", "powershell", "pwsh"}
-WRAPPERS = {"env", "nohup", "nice", "time", "command", "exec", "xargs"}
+WRAPPERS = {"env", "nohup", "nice", "time", "command", "exec", "xargs", "timeout"}
 
 
 def _program(item):
@@ -24,21 +30,27 @@ def _program(item):
 
 
 def is_risky(argv):
-    """Vrai si la commande doit être confirmée avant exécution."""
+    """Vrai par défaut; seuls quelques outils de lecture simple sont dispensés."""
     items = list(argv)
-    for index, item in enumerate(items[:-1]):
-        if _program(item) == "env" and items[index + 1] in {"-S", "--split-string"}:
-            try:
-                items[index + 2:index + 3] = shlex.split(items[index + 2], posix=os.name != "nt")
-            except (IndexError, ValueError):
-                return True
-            break
-    for item in items:
-        program = _program(item)
-        if program in WRAPPERS or item.startswith("-") or "=" in item:
-            continue
-        if program in RISKY_PROGRAMS or program in SHELLS or program.startswith("mkfs"):
-            return True
+    if not items:
+        return True
+
+    program = _program(items[0])
+    if (
+        program in RISKY_PROGRAMS
+        or program in SHELLS
+        or program in WRAPPERS
+        or program.startswith("mkfs")
+    ):
+        return True
+
+    if program not in READ_ONLY_PROGRAMS:
+        return True
+
+    # find permet d'exécuter une commande avec -exec/-execdir et d'effacer
+    # des fichiers avec -delete; il n'est donc pas inclus dans l'allowlist.
+    if program == "find":
+        return True
     return False
 
 

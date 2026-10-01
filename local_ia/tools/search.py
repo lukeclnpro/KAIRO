@@ -13,11 +13,13 @@ MAX_FILE_BYTES = 512 * 1024
 MAX_FILES = 3000
 
 
-def use(pattern, path=".", extension=None, max_results=30):
+def use(pattern, path=".", extension=None, max_results=30, allowed_roots=None):
     if not str(pattern or "").strip():
         raise ValueError("Motif de recherche vide.")
-    _allow_standard_directories()
-    root = file_commands._resolve(normalize_path(path or "."))
+    if allowed_roots is None:
+        _allow_standard_directories()
+        path = normalize_path(path or ".")
+    root = file_commands._resolve(path or ".", allowed_roots)
     if not root.exists():
         raise FileNotFoundError(f"Chemin introuvable : {root}")
     try:
@@ -46,7 +48,7 @@ def use(pattern, path=".", extension=None, max_results=30):
         if ext not in file_commands.TEXT_EXTENSIONS:
             continue
         try:
-            file = file_commands._resolve(str(file))
+            file = file_commands._resolve(str(file), allowed_roots)
             if file.stat().st_size > MAX_FILE_BYTES:
                 continue
             lines = file.read_text(encoding="utf-8", errors="replace").splitlines()

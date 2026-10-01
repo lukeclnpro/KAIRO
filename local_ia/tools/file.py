@@ -46,6 +46,8 @@ def _allow_standard_directories():
     file_commands.set_access_roots(roots)
 
 
-def use(path, extension=None):
-    _allow_standard_directories()
-    return file_commands.read_file(normalize_path(path), extension)
+def use(path, extension=None, allowed_roots=None):
+    if allowed_roots is None:
+        _allow_standard_directories()
+        path = normalize_path(path)
+    return file_commands.read_file(path, extension, allowed_roots)

@@ -3,7 +3,7 @@
 > IA locale, esprit libre. Un assistant personnel extensible avec Ollama optionnel et accès OpenRouter.
 
 <!-- VERSION:START -->
-**Version actuelle : `0.2.0`**
+**Version actuelle : `0.2.0.10(beta10)`**
 <!-- VERSION:END -->
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
@@ -94,7 +94,7 @@ python uninstall.py
 
 ## 🌐 Serveur web
 
-Local IA inclut un serveur web local permettant aux autres appareils du réseau d'accéder à l'IA.
+Le serveur web écoute uniquement sur `127.0.0.1` par défaut. Pour autoriser l'accès depuis le réseau local, démarrez-le explicitement sur toutes les interfaces :
 
 Lancement :
 
@@ -102,22 +102,31 @@ Lancement :
 python server.py
 ```
 
-> Selon votre configuration réseau et votre pare-feu, il peut être nécessaire d'autoriser le port utilisé par le serveur.
+Accès réseau authentifié :
+
+```bash
+python server.py --host 0.0.0.0
+```
+
+Un jeton aléatoire est affiché au démarrage; connectez-vous avec l'utilisateur `kairo` et ce jeton. Les commandes et lancements de programmes restent réservés aux clients locaux. Le trafic HTTP n'étant pas chiffré, n'exposez pas ce serveur sur un réseau non fiable.
 
 ## 🧪 Tests
 
-Chaque test peut être exécuté seul :
+Installez les dépendances du projet et les outils de développement, puis lancez Ruff et pytest :
 
 ```bash
-python3 tests/test_files.py
-python3 tests/test_commands.py
+python3 -m pip install -r requirements.txt pytest ruff
+ruff check .
+python3 -m pytest
 ```
 
-Pour lancer toute la suite :
+Le test réel de connexion OpenRouter est manuel et séparé de la suite :
 
 ```bash
-for test_file in tests/test_*.py; do python3 "$test_file" || exit 1; done
+python3 scripts/openrouter_smoke_test.py
 ```
+
+La clé est demandée sans être affichée. Il est aussi possible de la fournir via `OPENROUTER_API_KEY`.
 
 ## 🔄 Mises à jour
 
@@ -131,18 +140,59 @@ Le contenu ci-dessous est **généré automatiquement** à partir de ces deux fi
 ### 📌 Version actuelle
 
 <!-- VERSION:START -->
-**Version actuelle : `0.1.7`**
+**Version actuelle : `0.2.0.10(beta10)`**
 <!-- VERSION:END -->
 
 ### 📝 Journal des mises à jour
 
 <!-- UPDATES:START -->
 <details>
-<summary>Version `0.2.0.4(beta6)` — 2026-09-28 · **Recherche web multi-catégories (beta6)**</summary>
+<summary>Version `0.2.0.10(beta10)` — 2026-10-01 · **Connexion mémorisée et lancement direct du GUI (beta10)**</summary>
+
+- Les sessions de compte sont conservées dans le trousseau sécurisé du système et restaurées au démarrage du GUI et du CLI.
+- Le clic sur l’icône rapide ouvre désormais le GUI; l’action dédiée au terminal reste disponible.
+- Correction du doublon du bouton Paramètres dans le GUI.
+- L’auto-updater inclut désormais LICENSE et THIRD_PARTY_NOTICES.md et vérifie leur présence avant l’installation.
+
+</details>
+
+<details>
+<summary>Version `0.2.0.9(beta9)` — 2026-10-01 · **Aide PC et contrôle renforcé (beta9)**</summary>
+
+- iahelp fournit des commandes directement copiables et adapte ses conseils aux caractéristiques du PC et aux exécutables détectés.
+- La connexion OpenRouter d'iahelp est mémorisée dans le coffre-fort sécurisé du système pour éviter de ressaisir le mot de passe.
+- La commande /code présente d'abord un diagnostic et un diff; les fichiers ne sont modifiés qu'après approbation explicite.
+- Ajout des commandes /forget <id> et /forget-all pour gérer les souvenirs, avec confirmation avant la suppression complète.
+- Fiabilisation des vérifications : benchmark isolé sur des fichiers temporaires, test OpenRouter manuel séparé avec clé masquée, et fermeture correcte des réponses HTTP d'erreur lors du fallback mémoire.
+
+</details>
+
+<details>
+<summary>Version `0.2.0.8(beta8)` — 2026-10-01 · **Commande iahelp avec historique persistant (beta8)**</summary>
+
+- Ajout de la commande iahelp utilisable depuis n'importe quel dossier après installation.
+- Les demandes précédentes envoyées avec iahelp sont conservées localement et jointes comme contexte aux nouvelles requêtes.
+- Installation automatique du lanceur dans le PATH utilisateur sous Linux, macOS et Windows.
+
+</details>
+
+<details>
+<summary>Version `0.2.0.7(beta7)` — 2026-10-01 · **Comptes locaux et utilisation sans Ollama (beta7)**</summary>
+
+- Ajout d'un écran de démarrage pour se connecter, créer un compte ou continuer sans compte.
+- La création d'un compte ouvre les options API OpenRouter : clé, modèle, URL et timeout.
+- Les clés API sont chiffrées pour chaque compte local et déverrouillées uniquement après connexion.
+- Ollama devient facultatif : le menu et OpenRouter restent disponibles sans installation locale.
+
+</details>
+
+<details>
+<summary>Version `0.2.0.6(beta6)` — 2026-09-28 · **Recherche web multi-catégories et raccourci de lancement (beta6)**</summary>
 
 - Ajout de catégories de recherche : Web général, actualités, sites officiels, annonces et météo.
 - Recherche Google tentée en premier, avec repli automatique sur DuckDuckGo si les résultats Google ne sont pas accessibles.
 - Routage des demandes de recherche vers la catégorie adaptée et transmission du type de recherche à l'outil web.
+- Ajout d'une icône de zone de notification sous Linux/KDE et Windows, ouvrant main.py en un clic et démarrée à l'ouverture de session.
 
 </details>
 
@@ -230,7 +280,7 @@ Le contenu ci-dessous est **généré automatiquement** à partir de ces deux fi
 - Ajout d'un serveur local qui permet a tout les membres du reseau de discuter avec l'ia.
 - Correctif des premiers bug et test du server local
 - debut de la creation d'un portage executable du programme
-- IMPORTANT : un possible bug du programme sur le serveur est possible pour les personnes ayant deja telecharger les anciennes version du programme, nous vous conseillons donc de supprimer le programme et de refaire une installation propre depuis le depot github (https://github.com/lukeclnpro/KAIRO)
+- IMPORTANT : un possible bug du programme sur le serveur est possible pour les personnes ayant deja telecharger les anciennes version du programme, nous vous conseillons donc de supprimer le programme et de refaire une installation propre depuis le depot github (https://github.com/lukeclnpro/local_ia)
 
 </details>
 

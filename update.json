@@ -127,13 +127,79 @@
             ]
         },
         {
-            "version": "0.2.0.4(beta6)",
+            "version": "0.2.0.6(beta6)",
             "date": "2026-09-28",
-            "title": "Recherche web multi-catégories (beta6)",
+            "title": "Recherche web multi-catégories et raccourci de lancement (beta6)",
             "changes": [
                 "Ajout de catégories de recherche : Web général, actualités, sites officiels, annonces et météo.",
                 "Recherche Google tentée en premier, avec repli automatique sur DuckDuckGo si les résultats Google ne sont pas accessibles.",
-                "Routage des demandes de recherche vers la catégorie adaptée et transmission du type de recherche à l'outil web."
+                "Routage des demandes de recherche vers la catégorie adaptée et transmission du type de recherche à l'outil web.",
+                "Ajout d'une icône de zone de notification sous Linux/KDE et Windows, ouvrant main.py en un clic et démarrée à l'ouverture de session."
+            ]
+        },
+        {
+            "version": "0.2.0.7(beta7)",
+            "date": "2026-10-01",
+            "title": "Comptes locaux et utilisation sans Ollama (beta7)",
+            "changes": [
+                "Ajout d'un écran de démarrage pour se connecter, créer un compte ou continuer sans compte.",
+                "La création d'un compte ouvre les options API OpenRouter : clé, modèle, URL et timeout.",
+                "Les clés API sont chiffrées pour chaque compte local et déverrouillées uniquement après connexion.",
+                "Ollama devient facultatif : le menu et OpenRouter restent disponibles sans installation locale."
+            ]
+        },
+        {
+            "version": "0.2.0.8(beta8)",
+            "date": "2026-10-01",
+            "title": "Commande iahelp avec historique persistant (beta8)",
+            "changes": [
+                "Ajout de la commande iahelp utilisable depuis n'importe quel dossier après installation.",
+                "Les demandes précédentes envoyées avec iahelp sont conservées localement et jointes comme contexte aux nouvelles requêtes.",
+                "Installation automatique du lanceur dans le PATH utilisateur sous Linux, macOS et Windows."
+            ]
+        },
+        {
+            "version": "0.2.0.9(beta9)",
+            "date": "2026-10-01",
+            "title": "Aide PC et contrôle renforcé (beta9)",
+            "changes": [
+                "iahelp fournit des commandes directement copiables et adapte ses conseils aux caractéristiques du PC et aux exécutables détectés.",
+                "La connexion OpenRouter d'iahelp est mémorisée dans le coffre-fort sécurisé du système pour éviter de ressaisir le mot de passe.",
+                "La commande /code présente d'abord un diagnostic et un diff; les fichiers ne sont modifiés qu'après approbation explicite.",
+                "Ajout des commandes /forget <id> et /forget-all pour gérer les souvenirs, avec confirmation avant la suppression complète.",
+                "Fiabilisation des vérifications : benchmark isolé sur des fichiers temporaires, test OpenRouter manuel séparé avec clé masquée, et fermeture correcte des réponses HTTP d'erreur lors du fallback mémoire."
+            ]
+        },
+        {
+            "version": "0.2.0.10(beta10)",
+            "date": "2026-10-01",
+            "title": "Connexion mémorisée, sécurité et architecture (beta10)",
+            "changes": [
+                "Les sessions de compte sont conservées dans le trousseau sécurisé du système et restaurées au démarrage du GUI et du CLI.",
+                "Le clic sur l’icône rapide ouvre désormais le GUI; l’action dédiée au terminal reste disponible.",
+                "Correction du doublon du bouton Paramètres dans le GUI.",
+                "L’auto-updater inclut désormais LICENSE et THIRD_PARTY_NOTICES.md et vérifie leur présence avant l’installation.",
+                "Le serveur web écoute sur localhost par défaut; l’accès réseau exige un jeton et les commandes restent réservées aux clients locaux.",
+                "Les commandes inconnues nécessitent désormais une confirmation; seules les commandes de lecture explicitement autorisées s’exécutent directement.",
+                "Le dispatch POST du serveur est organisé par routes et les flux de création, fermeture et chat sont couverts par des tests HTTP.",
+                "Le catalogue, le scan et les menus de modèles, l’aide du CLI et les fonctions de mise à jour sont séparés dans le package local_ia.",
+                "Les embeddings des souvenirs sont stockés dans SQLite et les bases existantes sont migrées automatiquement; les sauvegardes de conversations utilisent des instantanés profonds et du JSON compact.",
+                "Les appels HTTP partagent un client qui valide les URL HTTP(S) et limite les retries aux requêtes GET et HEAD.",
+                "Ajout de pytest, Ruff et d'un workflow GitHub Actions; la suite compte 280 tests."
+            ]
+        },
+        {
+            "version": "0.2.0.11(beta11)",
+            "date": "2026-10-02",
+            "title": "Gestion des clés API et performances (beta11)",
+            "changes": [
+                "Ajout d'un menu dédié aux clés OpenRouter : aperçu masqué, consultation de l'usage par clé, ajout, suppression et activation ou désactivation.",
+                "L'état actif des clés est conservé dans le compte chiffré; seules les clés activées sont utilisées et le compte conserve toujours au moins une clé active.",
+                "L'exécution de commandes suit désormais une politique restrictive : les commandes inconnues ou capables d'exécuter du code nécessitent une confirmation.",
+                "Les embeddings des souvenirs sont stockés dans SQLite, avec migration des bases existantes et calcul limité aux requêtes ou aux souvenirs encore non indexés.",
+                "Les sauvegardes de conversations utilisent deepcopy et un JSON compact pour réduire le coût de sérialisation et la taille des fichiers.",
+                "Centralisation des requêtes HTTP avec validation des URL HTTP(S) et retries réservés aux requêtes GET et HEAD.",
+                "La suite atteint 286 tests; Ruff et pytest passent dans le workflow CI."
             ]
         }
     ]

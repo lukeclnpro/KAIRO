@@ -4,19 +4,19 @@
             "name": "deepseek-r1:14b",
             "id": "c333b7232bdb",
             "size": "9.0",
-            "modified": "GB 44 hours ago"
+            "modified": "GB 3 days ago"
         },
         {
             "name": "qwen2.5:1.5b",
             "id": "65ec06548149",
             "size": "986",
-            "modified": "MB 2 days ago"
+            "modified": "MB 4 days ago"
         },
         {
             "name": "llama3.2:3b",
             "id": "a80c4f17acd5",
             "size": "2.0",
-            "modified": "GB 3 days ago"
+            "modified": "GB 5 days ago"
         }
     ]
 }

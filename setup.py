@@ -15,9 +15,8 @@ Systèmes pris en charge :
 Le script :
     - détecte automatiquement le système
     - vérifie Python
-    - détecte Ollama
-    - vérifie que le serveur Ollama répond
-    - démarre Ollama si nécessaire sous Linux
+    - propose Ollama en option s'il n'est pas installé
+    - démarre Ollama si disponible
     - crée un environnement virtuel Python
     - installe requirements.txt
     - lance main.py
@@ -38,18 +37,26 @@ import argparse
 import os
 import platform
 import shutil
+import shlex
 import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
+import webbrowser
 from pathlib import Path
+from local_ia.http_client import open_url
 
 
 MIN_PYTHON = (3, 10)
 
 OLLAMA_HOST = "127.0.0.1"
 OLLAMA_PORT = 11434
+OLLAMA_LINUX_INSTALL_URL = "https://ollama.com/install.sh"
+OLLAMA_DOWNLOAD_URLS = {
+    "windows": "https://ollama.com/download/windows",
+    "macos": "https://ollama.com/download",
+}
 
 
 # ============================================================
@@ -289,38 +296,70 @@ def find_ollama():
 
 
 def check_ollama():
-    """Vérifie qu'Ollama est installé."""
+    """Retourne le chemin Ollama s'il est installé, sinon None."""
     ollama = find_ollama()
 
     if ollama:
         print(f"\nOllama détecté : {ollama}")
         return ollama
 
+    print("\nOllama n'est pas installé. Local IA peut aussi fonctionner sans Ollama.")
+    return None
+
+
+def install_ollama():
+    """Install Ollama after explicit user consent, or open its official installer."""
     system = get_system()
-
-    print("\nOllama est introuvable.")
-
-    if system == "windows":
-        print(
-            "\nInstalle Ollama depuis :\n"
-            "https://ollama.com/download/windows\n"
+    if system == "linux":
+        if not command_exists("curl"):
+            print("curl est absent; installation automatique d'Ollama impossible.")
+            return None
+        result = subprocess.run(
+            ["sh", "-c", f"curl -fsSL {OLLAMA_LINUX_INSTALL_URL} | sh"],
+            check=False,
         )
+        if result.returncode != 0:
+            print("L'installation d'Ollama a échoué; Local IA continuera sans lui.")
+            return find_ollama()
+        return find_ollama()
 
-    elif system == "macos":
-        print(
-            "\nInstalle Ollama depuis :\n"
-            "https://ollama.com/download\n"
-        )
+    download_url = OLLAMA_DOWNLOAD_URLS.get(system)
+    if download_url is None:
+        print("Installation automatique d'Ollama indisponible sur ce système.")
+        return None
 
-    elif system == "linux":
-        print(
-            "\nInstallation Linux officielle :\n"
-            "curl -fsSL https://ollama.com/install.sh | sh\n"
-        )
+    print(f"\nInstalle Ollama depuis : {download_url}")
+    try:
+        webbrowser.open(download_url)
+    except webbrowser.Error:
+        pass
+    try:
+        input("Après l'installation, appuie sur Entrée pour continuer sans Ollama : ")
+    except EOFError:
+        pass
+    return find_ollama()
 
-    raise RuntimeError(
-        "\nOllama doit être installé avant de continuer."
-    )
+
+def offer_ollama_install():
+    """Ask whether to install Ollama only when it is not already installed."""
+    ollama = check_ollama()
+    if ollama:
+        return ollama
+
+    choice = input("Installer Ollama maintenant ? [o/N] : ").strip().casefold()
+    if choice not in {"o", "oui", "y", "yes"}:
+        print("Installation d'Ollama ignorée. Local IA sera installé sans Ollama.")
+        return None
+
+    try:
+        ollama = install_ollama()
+    except (OSError, subprocess.SubprocessError) as error:
+        print(f"Installation d'Ollama impossible : {error}")
+        return None
+
+    if not ollama:
+        print("Ollama reste indisponible. L'installation de Local IA continue sans lui.")
+    return ollama
 
 
 # ============================================================
@@ -335,7 +374,7 @@ def ollama_api_available():
     )
 
     try:
-        with urllib.request.urlopen(
+        with open_url(
             url,
             timeout=2,
         ) as response:
@@ -665,6 +704,95 @@ def launch_project(project_dir, venv_python):
     )
 
 
+def _append_managed_block(path, marker, content):
+    try:
+        current = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        current = ""
+    if marker in current:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as file:
+        if current and not current.endswith("\n"):
+            file.write("\n")
+        file.write(f"\n{marker}\n{content}\n")
+
+
+def _register_unix_command_path(command_dir):
+    marker = "# local_ia iahelp PATH"
+    export_block = (
+        'case ":$PATH:" in *":$HOME/.local/bin:"*) ;; '
+        '*) export PATH="$HOME/.local/bin:$PATH" ;; esac'
+    )
+    for filename in (".profile", ".bashrc", ".zshrc"):
+        _append_managed_block(Path.home() / filename, marker, export_block)
+
+    fish_path = Path.home() / ".config" / "fish" / "conf.d" / "local_ia_iahelp.fish"
+    _append_managed_block(
+        fish_path,
+        marker,
+        'fish_add_path --path "$HOME/.local/bin"',
+    )
+
+
+def _register_windows_command_path(command_dir):
+    import winreg
+
+    key_path = r"Environment"
+    with winreg.OpenKey(
+        winreg.HKEY_CURRENT_USER,
+        key_path,
+        0,
+        winreg.KEY_QUERY_VALUE | winreg.KEY_SET_VALUE,
+    ) as key:
+        try:
+            current, value_type = winreg.QueryValueEx(key, "Path")
+        except FileNotFoundError:
+            current, value_type = "", winreg.REG_EXPAND_SZ
+        entries = [part for part in current.split(os.pathsep) if part]
+
+        def normalize(value):
+            return os.path.normcase(os.path.normpath(os.path.expandvars(value)))
+
+        if normalize(str(command_dir)) not in {normalize(part) for part in entries}:
+            entries.append(str(command_dir))
+            winreg.SetValueEx(key, "Path", 0, value_type, os.pathsep.join(entries))
+
+
+def install_iahelp_command(project_dir, venv_python):
+    """Installe la commande iahelp dans le PATH utilisateur."""
+    system = get_system()
+    main_py = (Path(project_dir) / "main.py").resolve()
+    python_path = Path(venv_python).resolve()
+
+    if system == "windows":
+        command_dir = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "LocalIA" / "bin"
+        command_dir.mkdir(parents=True, exist_ok=True)
+        launcher = command_dir / "iahelp.cmd"
+        launcher.write_text(
+            f'@echo off\n"{python_path}" "{main_py}" iahelp %*\n',
+            encoding="utf-8",
+        )
+        _register_windows_command_path(command_dir)
+    elif system in {"linux", "macos"}:
+        command_dir = Path.home() / ".local" / "bin"
+        command_dir.mkdir(parents=True, exist_ok=True)
+        launcher = command_dir / "iahelp"
+        launcher.write_text(
+            "#!/bin/sh\n"
+            f"exec {shlex.quote(str(python_path))} {shlex.quote(str(main_py))} iahelp \"$@\"\n",
+            encoding="utf-8",
+        )
+        launcher.chmod(0o755)
+        _register_unix_command_path(command_dir)
+    else:
+        raise RuntimeError(f"Système non pris en charge pour iahelp : {system}")
+
+    print(f"Commande iahelp installée : {launcher}")
+    print("Ouvre un nouveau terminal si la commande n'est pas encore reconnue.")
+    return launcher
+
+
 # ============================================================
 # ARGUMENTS
 # ============================================================
@@ -704,7 +832,7 @@ def main():
         )
 
     print("========================================")
-    print("       local_ia - Installation")
+    print("       KAIRO - Installation")
     print("       Multiplateforme")
     print("========================================")
 
@@ -718,11 +846,19 @@ def main():
     check_python()
     check_basic_tools()
 
-    # Ollama
-    print("\n=== Vérification Ollama ===")
-
-    ollama = check_ollama()
-    ensure_ollama_service(ollama)
+    # Ollama est facultatif : la proposition n'apparaît que s'il est absent.
+    print("\n=== Vérification Ollama (facultatif) ===")
+    ollama = offer_ollama_install()
+    ollama_ready = False
+    if ollama:
+        try:
+            ensure_ollama_service(ollama)
+            ollama_ready = ollama_api_available()
+        except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+            print(f"Ollama indisponible : {error}")
+            print("Local IA continuera sans Ollama.")
+    else:
+        print("Ollama ignoré; vous pourrez l'installer plus tard depuis https://ollama.com/download.")
 
     # Environnement Python
     venv_python = create_venv(project_dir)
@@ -732,11 +868,13 @@ def main():
         venv_python,
     )
 
-    # Test Ollama
-    test_ollama(
-        project_dir,
-        venv_python,
-    )
+    install_iahelp_command(project_dir, venv_python)
+
+    # Ne pas bloquer l'installation si Ollama n'est pas installé ou démarré.
+    if ollama_ready:
+        test_ollama(project_dir, venv_python)
+    else:
+        print("\nTest Ollama ignoré : aucun serveur Ollama disponible.")
 
     # Lancement
     if args.no_launch:

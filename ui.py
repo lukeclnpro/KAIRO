@@ -17,6 +17,10 @@ import subprocess
 import sys
 from datetime import datetime
 
+
+PRODUCT_NAME = "KAIRO"
+PRODUCT_TAGLINE = "IA locale, esprit libre"
+
 # Active les couleurs ANSI sous l'invite de commandes Windows
 # (sans effet et sans erreur sous Linux/macOS).
 try:
@@ -53,12 +57,12 @@ class C:
     BRIGHT_WHITE = "\033[97m"
 
     # Rôles sémantiques utilisés dans tout le projet
-    BORDER = BRIGHT_CYAN
+    BORDER = BRIGHT_BLUE
     TITLE = BOLD + BRIGHT_CYAN
     SUBTITLE = DIM + WHITE
     OPTION = BRIGHT_WHITE
-    OPTION_KEY = BOLD + BRIGHT_YELLOW
-    FOOTER = DIM + YELLOW
+    OPTION_KEY = BOLD + BRIGHT_MAGENTA
+    FOOTER = DIM + BRIGHT_YELLOW
 
     USER = BOLD + BRIGHT_GREEN
     IA = BOLD + BRIGHT_MAGENTA
@@ -190,7 +194,7 @@ def wrap_text(text, width):
 # MENU PLEIN ECRAN
 # ============================================================
 
-def full_menu(title, options, subtitle=None, footer=None):
+def full_menu(title, options, subtitle=None, footer=None, clear=True):
     """
     Affiche un menu qui occupe toute la fenêtre du terminal
     (largeur ET hauteur).
@@ -198,7 +202,8 @@ def full_menu(title, options, subtitle=None, footer=None):
     options : liste de tuples (touche, libellé)
     """
 
-    clear_screen()
+    if clear:
+        clear_screen()
 
     width, height = term_size()
     inner = width - 2
@@ -283,6 +288,24 @@ def section_title(title, clear=True):
     print(colorize("═" * width, C.BORDER))
     print(colorize(f" {title}".center(width), C.TITLE))
     print(colorize("═" * width, C.BORDER))
+    print()
+
+
+def brand_logo():
+    """Affiche le logotype terminal de KAIRO."""
+    print(colorize("       ╭──────────────────────────╮", C.BORDER))
+    print(
+        colorize("       │", C.BORDER)
+        + colorize("   ◈ ", C.OPTION_KEY)
+        + colorize(PRODUCT_NAME, C.TITLE)
+        + colorize("                 │", C.BORDER)
+    )
+    print(
+        colorize("       │", C.BORDER)
+        + colorize(f" {PRODUCT_TAGLINE:<25}", C.INFO)
+        + colorize("│", C.BORDER)
+    )
+    print(colorize("       ╰──────────────────────────╯", C.BORDER))
     print()
 
 

@@ -24,6 +24,22 @@ _WEB_SEARCH = re.compile(
     r"[àa]\s+vendre|[àa]\s+louer)\b",
     re.I,
 )
+_PAGE_ADDRESS = re.compile(
+    r"(?:https?://|www\.)[^\s<>]+|(?:[\w](?:[\w-]*[\w])?\.)+[a-z]{2,}(?:/[^\s<>]*)?",
+    re.I,
+)
+_OPEN_PAGE_ACTION = re.compile(
+    r"\b(?:ouvre|ouvrir|visite|visiter|affiche|afficher|va\s+sur|aller\s+sur|open|visit|go\s+to)\b",
+    re.I,
+)
+_CALCULATOR_INTENT = re.compile(
+    r"\b(?:calcul(?:e|er|atrice)?|combien\s+(?:font|fait)|r[ée]sultat\s+de|racine\s+carr[ée]e)\b",
+    re.I,
+)
+_ARITHMETIC_EXPRESSION = re.compile(
+    r"(?<![\w.])\d+(?:[.,]\d+)?\s*(?:\+|\*{1,2}|/|%|\^|×|÷|\s+-\s+)\s*(?:\d|\(|pi\b|e\b)",
+    re.I,
+)
 _FILE_TARGET = re.compile(
     r"(?:[/\\]|\b[\w.-]+\.(?:py|js|ts|tsx|jsx|html|css|json|txt|md|sh|sql|rs|go|java)\b|\b(?:fichier|dossier|r[ée]pertoire|projet|script|code|programme)\b)",
     re.I,
@@ -50,6 +66,12 @@ class RequestRouter:
         text = str(message or "").strip()
         if _COMMAND.search(text):
             return {"mode": "tool", "action": "command", "tools": ("command",), "answer": None}
+
+        if _CALCULATOR_INTENT.search(text) or _ARITHMETIC_EXPRESSION.search(text):
+            return {"mode": "tool", "action": "calculator", "tools": ("calculator",), "answer": None}
+
+        if _PAGE_ADDRESS.search(text) and _OPEN_PAGE_ACTION.search(text):
+            return {"mode": "tool", "action": "open_page", "tools": ("open_page",), "answer": None}
 
         has_file_target = bool(_FILE_TARGET.search(text))
         if has_file_target and (_FILE_ACTION.search(text) or _SIMPLE_QUESTION.search(text)):

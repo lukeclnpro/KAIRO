@@ -17,10 +17,11 @@ from datetime import date
 from pathlib import Path
 
 import application_launcher
+import command_commands
 from local_ia.config.manager import model_config
-from local_ia.core.context import build_system_prompt, load_context
+from local_ia.core.context import load_context
 from local_ia.core.context_compiler import ContextCompiler
-from local_ia.core.conversation import get_chat_history
+from local_ia.core.conversation import get_weighted_chat_history
 from local_ia.core.memory import get_memories, init_database
 from local_ia.core.router import RequestRouter
 from local_ia.llm.ollama import ask_ollama
@@ -36,17 +37,20 @@ TOOL_ALIASES = {
     "list_dir": "list", "list_directory": "list", "listing": "list", "ls": "list", "dir": "list",
     "grep": "search", "find": "search", "search_files": "search",
     "launch_application": "launch",
+    "open_url": "open_page", "open_website": "open_page", "browse_page": "open_page",
     "execute_command": "command", "run_command": "command", "run": "command",
     "volume": "system", "install": "system", "update": "system",
 }
 PAYLOAD_KEYS = (
     "name", "argv", "path", "content", "extension", "action", "value", "amount",
-    "old", "new", "replace_all", "pattern", "cwd", "timeout", "max_results", "query", "category",
+    "old", "new", "replace_all", "append", "pattern", "cwd", "timeout", "max_results", "query", "category", "url",
 )
 
 MAX_TOOL_STEPS = 4
+MAX_CHUNKED_WRITE_STEPS = 128
 MAX_TOOL_RESULT_CHARS = 2500
-MAX_TOOL_STEPS_BY_MODE = {"tool": 3, "agent": MAX_TOOL_STEPS, "chat": 0, "direct": 0}
+LOCAL_CODE_MAX_RESPONSE_TOKENS = 4096
+MAX_TOOL_STEPS_BY_MODE = {"tool": 3, "agent": MAX_TOOL_STEPS, "local_code": 12, "chat": 0, "direct": 0}
 CONFIRMATIONS = {
     "oui", "yes", "ok", "d'accord", "d accord", "je confirme", "confirme", "confirmé",
     "oui je confirme", "vas-y", "go", "c'est bon",
@@ -54,6 +58,13 @@ CONFIRMATIONS = {
 # Mots qui montrent que l'utilisateur attend autre chose que l'action elle-même.
 FOLLOW_UP_RE = re.compile(
     r"\b(puis|ensuite|apr[eè]s|et dis|dis-moi|montre-moi|et montre|et affiche|then)\b", re.I
+)
+MULTI_PART_WRITE_RE = re.compile(
+    r"\b(?:plusieurs|multiples|diff[ée]rents?)\s+(?:blocs?|parties|segments)\b", re.I
+)
+LARGE_FILE_REQUEST_RE = re.compile(
+    r"\b(?:tr[eè]s\s+grand|gros|grosse|[ée]norme|immense|gigantesque|volumineux|sans\s+limite)\b",
+    re.I,
 )
 
 _POLITE = r"(?:(?:peux-tu|pourrais-tu|tu peux|s'il te pla[iî]t)\s+)*"
@@ -244,7 +255,7 @@ class LocalAgent:
         prompt = prompts[1 if include_tools else 0]
         if external_info:
             prompt += "\n\n" + str(external_info)
-        return [{"role": "system", "content": prompt}, *get_chat_history(chat), {"role": "user", "content": message}]
+        return [{"role": "system", "content": prompt}, *get_weighted_chat_history(chat), {"role": "user", "content": message}]
 
     # ------------------------------------------------------------------
     # Voie rapide : aucune génération, l'action est faite tout de suite.
@@ -258,39 +269,59 @@ class LocalAgent:
         if "<tool_call>" in text.casefold():
             return None
 
+        handlers = (
+            self._fast_path_application_alias,
+            self._fast_path_application_path,
+            self._fast_path_date,
+            self._fast_path_volume,
+            self._fast_path_system_info,
+            self._fast_path_launch,
+        )
+        for handler in handlers:
+            answer = handler(text, allowed_tools)
+            if answer is not None:
+                return answer
+        return None
+
+    def _fast_path_application_alias(self, text, allowed_tools):
         alias_match = _APP_ALIAS_RE.fullmatch(text) or _APP_PC_ALIAS_RE.fullmatch(text)
-        if alias_match:
-            alias = alias_match.group("alias").strip(" .!?\"'")
-            target = alias_match.group("target").strip().strip("\"'`").rstrip(".,;:!?")
-            try:
-                target_path = Path(target).expanduser()
-                target_is_path = (
-                    target_path.is_absolute()
-                    or target_path.exists()
-                    or bool(re.match(r"^[A-Za-z]:[\\/]", target))
-                )
-            except (OSError, ValueError):
-                target_is_path = bool(re.match(r"^[A-Za-z]:[\\/]", target))
-            try:
-                application = application_launcher.register_application_alias(alias, target)
-            except (FileNotFoundError, OSError, ValueError) as error:
-                return f"Je n'ai pas pu associer {alias} à {target} : {error}"
-            if target_is_path:
-                return f"Chemin de {application['name']} enregistré sous le nom {alias}."
-            return f"{alias} associé à {application['name']} pour les prochains lancements."
+        if not alias_match:
+            return None
 
-        if not _LAUNCH_RE.fullmatch(text) and _APP_PATH_CONTEXT_RE.search(text):
-            path_match = _APP_PATH_RE.search(text)
-            if path_match:
-                application_path = path_match.group("path").strip().strip("\"'`").rstrip(".,;:!?")
-                try:
-                    application = application_launcher.register_application(None, application_path)
-                except (FileNotFoundError, OSError, ValueError) as error:
-                    return f"Je n'ai pas pu enregistrer ce chemin d'application : {error}"
-                return (
-                    f"Chemin de {application['name']} enregistré pour les prochains lancements."
-                )
+        alias = alias_match.group("alias").strip(" .!?\"'")
+        target = alias_match.group("target").strip().strip("\"'`").rstrip(".,;:!?")
+        try:
+            target_path = Path(target).expanduser()
+            target_is_path = (
+                target_path.is_absolute()
+                or target_path.exists()
+                or bool(re.match(r"^[A-Za-z]:[\\/]", target))
+            )
+        except (OSError, ValueError):
+            target_is_path = bool(re.match(r"^[A-Za-z]:[\\/]", target))
+        try:
+            application = application_launcher.register_application_alias(alias, target)
+        except (FileNotFoundError, OSError, ValueError) as error:
+            return f"Je n'ai pas pu associer {alias} à {target} : {error}"
+        if target_is_path:
+            return f"Chemin de {application['name']} enregistré sous le nom {alias}."
+        return f"{alias} associé à {application['name']} pour les prochains lancements."
 
+    def _fast_path_application_path(self, text, allowed_tools):
+        if _LAUNCH_RE.fullmatch(text) or not _APP_PATH_CONTEXT_RE.search(text):
+            return None
+        path_match = _APP_PATH_RE.search(text)
+        if not path_match:
+            return None
+
+        application_path = path_match.group("path").strip().strip("\"'`").rstrip(".,;:!?")
+        try:
+            application = application_launcher.register_application("", application_path)
+        except (FileNotFoundError, OSError, ValueError) as error:
+            return f"Je n'ai pas pu enregistrer ce chemin d'application : {error}"
+        return f"Chemin de {application['name']} enregistré pour les prochains lancements."
+
+    def _fast_path_date(self, text, allowed_tools):
         if _DATE_RE.fullmatch(text):
             today = date.today()
             weekdays = (
@@ -304,7 +335,9 @@ class LocalAgent:
                 f"Aujourd'hui, nous sommes le {weekdays[today.weekday()]} "
                 f"{today.day} {months[today.month - 1]} {today.year}."
             )
+        return None
 
+    def _fast_path_volume(self, text, allowed_tools):
         for pattern, action, answer in _VOLUME_RULES:
             match = pattern.fullmatch(text)
             if not match:
@@ -319,7 +352,9 @@ class LocalAgent:
             if isinstance(result, dict) and result.get("returncode"):
                 return f"Le volume n'a pas pu être modifié : {result.get('stderr') or 'erreur inconnue'}"
             return answer
+        return None
 
+    def _fast_path_system_info(self, text, allowed_tools):
         if _SYSTEM_INFO_RE.fullmatch(text):
             if allowed_tools is not None and "system" not in allowed_tools:
                 return None
@@ -331,7 +366,9 @@ class LocalAgent:
                 f"Système : {info.get('system', 'inconnu')} "
                 f"{info.get('release', '')} ({info.get('machine', 'architecture inconnue')})"
             ).strip()
+        return None
 
+    def _fast_path_launch(self, text, allowed_tools):
         match = _LAUNCH_RE.fullmatch(text)
         if not match:
             return None
@@ -368,35 +405,47 @@ class LocalAgent:
     # ------------------------------------------------------------------
     @staticmethod
     def parse_tool_call(content):
-        match = re.search(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", content or "", re.S)
+        text = str(content or "")
+        match = re.search(r"<tool_call>\s*(.*?)(?:</tool_call>|$)", text, re.S | re.I)
         wrapper_name = None
-        if not match:
+        if match:
+            raw_payload = match.group(1).strip()
+            raw_payload = re.sub(r"^```(?:json)?\s*", "", raw_payload, flags=re.I)
+            raw_payload = re.sub(r"\s*```\s*$", "", raw_payload)
+        else:
             # Tolère les balises simplifiées émises par certains petits modèles,
             # par exemple : <write{"tool":"file",...})
             match = re.search(
-                r"<(write(?:\.py)?|file|launch|command|system|edit|list|search|web)\s*(\{.*)",
-                content or "",
+                r"<(write(?:\.py)?|file|launch|open_page|open_url|command|system|edit|list|search|web)\s*(\{.*)",
+                text,
                 re.S | re.I,
             )
             if match:
                 wrapper_name = match.group(1).lower()
         if not match:
             return None
-        raw_payload = match.group(2) if wrapper_name else match.group(1)
+        if wrapper_name:
+            raw_payload = match.group(2)
+        decode_input = raw_payload.lstrip()
         try:
-            payload = json.loads(raw_payload)
+            payload, end = json.JSONDecoder().raw_decode(decode_input)
         except json.JSONDecodeError:
             try:
                 # Accepte une accolade finale en trop et les apostrophes
                 # échappées comme dans une chaîne Python.
-                payload, _ = json.JSONDecoder().raw_decode(raw_payload.replace("\\'", "'"))
+                decode_input = decode_input.replace("\\'", "'")
+                payload, end = json.JSONDecoder().raw_decode(decode_input)
             except json.JSONDecodeError:
                 return None
+        trailing = decode_input[end:].strip()
+        if trailing and not (wrapper_name and trailing == "}"):
+            return None
         if not isinstance(payload, dict):
             return None
-        raw_tool = wrapper_name or payload.get("tool")
+        raw_tool = wrapper_name or payload.get("tool") or payload.get("name")
         if not isinstance(raw_tool, str):
             return None
+        inferred_name = not wrapper_name and not payload.get("tool") and payload.get("name") == raw_tool
         if raw_tool.endswith(".py"):
             raw_tool = raw_tool[:-3]
         if wrapper_name == "write" and payload.get("content") is not None:
@@ -408,6 +457,8 @@ class LocalAgent:
         arguments = dict(arguments) if isinstance(arguments, dict) else {}
         # Certains modèles placent les paramètres directement dans l'appel.
         for key in PAYLOAD_KEYS:
+            if key == "name" and inferred_name:
+                continue
             if key in payload and key not in arguments:
                 arguments[key] = payload[key]
         if raw_tool == "volume":
@@ -425,9 +476,24 @@ class LocalAgent:
         return ToolManager.execute(tool_call, chat, self.connection, allowed_tools)
 
     @staticmethod
-    def _tool_message(tool_name, payload):
+    def _tool_message(tool_name, payload, verification=None):
         text = ToolManager.compact_result(payload, MAX_TOOL_RESULT_CHARS)
+        if verification is not None:
+            receipt = ToolManager.compact_result(verification, 600)
+            text += f"\nVérification indépendante :\n{receipt}"
         return {"role": "tool", "content": f"Résultat de l'outil {tool_name} :\n{text}"}
+
+    @staticmethod
+    def _verification_failure(tool_name, verification):
+        if tool_name == "write":
+            return "Je n'ai pas pu confirmer que le contenu attendu est bien enregistré; je ne peux pas annoncer la création comme terminée."
+        if tool_name == "edit":
+            return "Je n'ai pas pu confirmer la modification sur disque; je ne peux pas annoncer la correction comme terminée."
+        if tool_name == "command":
+            return "La commande n'a pas réussi ou son résultat n'a pas pu être vérifié."
+        if tool_name == "launch":
+            return "La demande a été envoyée au lanceur, mais je ne peux pas confirmer que l'application est effectivement ouverte."
+        return "L'action n'a pas réussi ou son résultat n'a pas pu être vérifié."
 
     @staticmethod
     def _summary(tool_call, result):
@@ -435,13 +501,201 @@ class LocalAgent:
         if tool_call["tool"] == "write" and isinstance(result, dict):
             return f"Fichier créé ou modifié : {result.get('path', 'chemin inconnu')}"
         if tool_call["tool"] == "launch" and isinstance(result, dict):
-            return f"{result.get('name', tool_call['arguments'].get('name', 'Application'))} lancé."
+            return f"Demande de lancement envoyée pour {result.get('name', tool_call['arguments'].get('name', 'l’application'))}."
+        if tool_call["tool"] == "open_page" and isinstance(result, dict):
+            return f"Page ouverte dans le navigateur : {result.get('url', 'URL inconnue')}"
         return None
+
+    def _explicit_command(self, message, chat, allowed_tools):
+        """Exécute /commande directement, sans demander au modèle de reconstruire argv."""
+        try:
+            argv = command_commands.parse_command(str(message or ""))
+        except ValueError:
+            self.last_route = {"mode": "direct", "action": "command", "tools": (), "answer": None}
+            return 'Syntaxe : /commande "programme" [arguments].'
+        if argv is None:
+            return None
+
+        self.last_route = {"mode": "direct", "action": "command", "tools": (), "answer": None}
+        if allowed_tools is not None and "command" not in allowed_tools:
+            return "L'exécution de commandes est désactivée pour cette requête."
+
+        tool_call = {"tool": "command", "arguments": {"argv": argv}}
+        try:
+            result = self.execute_tool(tool_call, chat, allowed_tools=allowed_tools)
+        except Exception as error:
+            logging.getLogger(__name__).warning(
+                "Échec d'une commande explicite (%s)", type(error).__name__
+            )
+            return "Je n'ai pas pu exécuter cette commande. Vérifie le programme, ses arguments et les autorisations."
+
+        if isinstance(result, dict) and result.get("confirmation_required"):
+            chat["pending_tool"] = tool_call
+            return f"{result.get('message', 'Confirmation nécessaire.')}\nRéponds « oui » pour confirmer."
+
+        verification = ToolManager.verify_result(tool_call, result, chat)
+        if not verification["verified"]:
+            return self._verification_failure("command", verification)
+        if not isinstance(result, dict):
+            return "La commande n'a pas renvoyé de résultat exploitable."
+        output = str(result.get("stdout") or "").strip()
+        stderr = str(result.get("stderr") or "").strip()
+        details = output or stderr or "(aucune sortie)"
+        command_text = " ".join(argv)
+        if result.get("returncode", 1) != 0:
+            return f"La commande « {command_text} » s'est terminée avec le code {result['returncode']}.\n{details}"
+        return f"Commande terminée : {command_text}\n{details}"
 
     # ------------------------------------------------------------------
     # Réponse à un message
     # ------------------------------------------------------------------
-    def respond(self, chat, message, external_info=None, allowed_tools=None, stream=False):
+    def respond(self, chat, message, external_info=None, allowed_tools=None, stream=False, local_code=False):
+        pending_tool, route, selected_tools, direct_answer = self._resolve_response_route(
+            chat, message, allowed_tools, local_code
+        )
+        if direct_answer is not None:
+            return direct_answer
+        assert route is not None and selected_tools is not None
+
+        messages = self.build_messages(chat, message, external_info, tools=selected_tools, route=route)
+        if pending_tool:
+            tool_call = pending_tool
+            tool_call["arguments"]["confirmed"] = True
+            if allowed_tools is not None:
+                allowed_tools = set(allowed_tools) | {tool_call["tool"]}
+            answer = "<tool_call>" + json.dumps(tool_call, ensure_ascii=False) + "</tool_call>"
+        else:
+            tool_call, answer = self._generate_tool_call(messages, route, stream)
+            if tool_call is None:
+                return answer
+
+        seen = set()
+        last_call, last_result, last_error = tool_call, None, None
+        verification_failures = []
+        tool_limit = self.get_max_tool_steps(route)
+        chunked_write = tool_call["tool"] == "write" and bool(tool_call["arguments"].get("append"))
+        if chunked_write:
+            tool_limit = max(tool_limit, MAX_CHUNKED_WRITE_STEPS)
+        step = 0
+        while step < tool_limit:
+            key = self.normalize_tool_call(tool_call)
+            if key in seen:
+                break  # le modèle tourne en rond : on s'arrête
+            seen.add(key)
+            last_call = tool_call
+            result, verification, confirmation_message = self._execute_and_verify(
+                tool_call, chat, selected_tools
+            )
+            last_result = result
+
+            if confirmation_message is not None:
+                chat["pending_tool"] = tool_call
+                return f"{confirmation_message}\nRéponds « oui » pour confirmer."
+            assert verification is not None
+
+            payload = result if result is not None else {"error": "L'appel à cet outil n'a pas abouti. Vérifie les arguments et réessaie."}
+            if not verification["verified"] or not verification["success"]:
+                verification_failures.append((tool_call["tool"], verification))
+            last_error = None if verification["success"] else True
+
+            if (
+                step == 0
+                and route.get("mode") != "local_code"
+                and not pending_tool
+                and last_error is None
+                and not FOLLOW_UP_RE.search(str(message))
+                and not MULTI_PART_WRITE_RE.search(str(message))
+                and not (
+                    tool_call["tool"] == "write"
+                    and LARGE_FILE_REQUEST_RE.search(str(message))
+                )
+            ):
+                summary = self._summary(tool_call, result) if verification["success"] else None
+                if summary:
+                    return summary  # action simple : inutile de rappeler le modèle
+
+            messages.append({"role": "assistant", "content": answer})
+            messages.append(self._tool_message(tool_call["tool"], payload, verification))
+            answer = ask_ollama(
+                list(messages),
+                model=self.model,
+                max_tokens=LOCAL_CODE_MAX_RESPONSE_TOKENS if route.get("mode") == "local_code" else None,
+            )
+            tool_call = self.parse_tool_call(answer)
+            if not tool_call:
+                if verification_failures:
+                    failed_tool, failed_verification = verification_failures[-1]
+                    return self._verification_failure(failed_tool, failed_verification)
+                return answer
+            step += 1
+            if (
+                not chunked_write
+                and tool_call["tool"] == "write"
+                and bool(tool_call["arguments"].get("append"))
+            ):
+                chunked_write = True
+                tool_limit = max(tool_limit, step + MAX_CHUNKED_WRITE_STEPS)
+
+        if chunked_write and tool_call is not None and step >= tool_limit:
+            path = tool_call["arguments"].get("path") or last_call["arguments"].get("path", "le fichier")
+            return f"L'écriture de {path} continue au-delà des blocs traités dans cette réponse. Demande-moi de la continuer."
+        if verification_failures:
+            failed_tool, failed_verification = verification_failures[-1]
+            return self._verification_failure(failed_tool, failed_verification)
+        if last_error:
+            if last_call["tool"] == "command":
+                return "Je n'ai pas pu exécuter cette commande. Vérifie le programme, ses arguments et les autorisations."
+            return "Je n'ai pas pu terminer cette action. Vérifie les informations fournies et réessaie."
+        summary = self._summary(last_call, last_result)
+        return summary or f"Action {last_call['tool']} exécutée."
+
+    def _execute_and_verify(self, tool_call, chat, allowed_tools):
+        try:
+            result = self.execute_tool(tool_call, chat, allowed_tools=allowed_tools)
+        except Exception as error:
+            logging.getLogger(__name__).warning(
+                "Échec de l'outil %s (%s)", tool_call["tool"], type(error).__name__
+            )
+            result = None
+
+        if isinstance(result, dict) and result.get("confirmation_required"):
+            return result, None, result.get("message", "Confirmation nécessaire.")
+        return result, ToolManager.verify_result(tool_call, result, chat), None
+
+    def _generate_tool_call(self, messages, route, stream):
+        answer = ask_ollama(
+            list(messages),
+            model=self.model,
+            stream=bool(stream),
+            max_tokens=LOCAL_CODE_MAX_RESPONSE_TOKENS if route.get("mode") == "local_code" else None,
+        )
+        tool_call = self.parse_tool_call(answer if isinstance(answer, str) else "".join(answer))
+        if not tool_call and route.get("mode") == "local_code":
+            answer_text = answer if isinstance(answer, str) else "".join(answer)
+            messages.append({"role": "assistant", "content": answer_text})
+            messages.append({
+                "role": "user",
+                "content": (
+                    "Tu as décrit un plan, mais tu n'as pas encore agi. Continue maintenant sans attendre "
+                    "de réponse de l'utilisateur : utilise les outils autorisés pour réaliser la demande. "
+                    "Ne renvoie un texte que si une information réellement indispensable bloque le travail."
+                ),
+            })
+            answer = ask_ollama(
+                list(messages),
+                model=self.model,
+                max_tokens=LOCAL_CODE_MAX_RESPONSE_TOKENS,
+            )
+            tool_call = self.parse_tool_call(answer if isinstance(answer, str) else "".join(answer))
+        if tool_call:
+            return tool_call, answer
+
+        answer_text = answer if isinstance(answer, str) else "".join(answer)
+        if "<tool_call>" in answer_text.casefold():
+            return None, "Je n'ai pas pu comprendre l'action demandée. Reformule la commande ou précise ses arguments."
+        return None, answer_text
+
+    def _resolve_response_route(self, chat, message, allowed_tools, local_code):
         normalized_message = str(message or "").strip().lower().rstrip(" .!")
         # Une confirmation en attente ne vaut que pour le message qui suit
         # immédiatement : tout autre message l'annule (pas de « oui » tardif).
@@ -449,7 +703,21 @@ class LocalAgent:
         if normalized_message not in CONFIRMATIONS:
             pending_tool = None
 
-        if not pending_tool:
+        if not pending_tool and not local_code:
+            command_answer = self._explicit_command(message, chat, allowed_tools)
+            if command_answer is not None:
+                return None, None, None, command_answer
+
+        if not pending_tool and local_code:
+            selected_tools = set(allowed_tools) if allowed_tools is not None else set(TOOL_NAMES)
+            route = {
+                "mode": "local_code",
+                "action": "local_code",
+                "tools": tuple(sorted(selected_tools)),
+                "answer": None,
+            }
+            self.last_route = route
+        elif not pending_tool:
             route = self.router.route(
                 message,
                 lambda current_message, tools: (
@@ -464,7 +732,7 @@ class LocalAgent:
                 route["mode"], route["action"], route["tools"],
             )
             if route["mode"] == "direct":
-                return route["answer"]
+                return None, None, None, route["answer"]
             selected_tools = ToolManager.get_tools(route, allowed_tools)
         else:
             selected_tools = set(allowed_tools) if allowed_tools is not None else set(TOOL_NAMES)
@@ -477,57 +745,7 @@ class LocalAgent:
             }
             self.last_route = route
 
-        messages = self.build_messages(chat, message, external_info, tools=selected_tools, route=route)
-        if pending_tool:
-            tool_call = pending_tool
-            tool_call["arguments"]["confirmed"] = True
-            if allowed_tools is not None:
-                allowed_tools = set(allowed_tools) | {tool_call["tool"]}
-            answer = "<tool_call>" + json.dumps(tool_call, ensure_ascii=False) + "</tool_call>"
-        else:
-            answer = ask_ollama(list(messages), model=self.model, stream=bool(stream) and not pending_tool)
-            tool_call = self.parse_tool_call(answer if isinstance(answer, str) else "".join(answer))
-            if not tool_call:
-                if isinstance(answer, str):
-                    return answer
-                return "".join(answer)
-
-        seen = set()
-        last_call, last_result, last_error = tool_call, None, None
-        tool_limit = self.get_max_tool_steps(route)
-        for step in range(tool_limit):
-            key = self.normalize_tool_call(tool_call)
-            if key in seen:
-                break  # le modèle tourne en rond : on s'arrête
-            seen.add(key)
-            last_call = tool_call
-            try:
-                result = self.execute_tool(tool_call, chat, allowed_tools=selected_tools)
-                payload, last_error = result, None
-            except Exception as error:
-                result, payload, last_error = None, {"error": str(error)}, str(error)
-            last_result = result
-
-            if isinstance(result, dict) and result.get("confirmation_required"):
-                chat["pending_tool"] = tool_call
-                return f"{result.get('message', 'Confirmation nécessaire.')}\nRéponds « oui » pour confirmer."
-
-            if step == 0 and not pending_tool and last_error is None and not FOLLOW_UP_RE.search(str(message)):
-                summary = self._summary(tool_call, result)
-                if summary:
-                    return summary  # action simple : inutile de rappeler le modèle
-
-            messages.append({"role": "assistant", "content": answer})
-            messages.append(self._tool_message(tool_call["tool"], payload))
-            answer = ask_ollama(list(messages), model=self.model)
-            tool_call = self.parse_tool_call(answer)
-            if not tool_call:
-                return answer
-
-        if last_error:
-            return f"L'action {last_call['tool']} a échoué : {last_error}"
-        summary = self._summary(last_call, last_result)
-        return summary or f"Action {last_call['tool']} exécutée."
+        return pending_tool, route, selected_tools, None
 
     def close(self):
         self.connection.close()

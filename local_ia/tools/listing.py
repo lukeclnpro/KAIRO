@@ -8,9 +8,11 @@ from local_ia.tools.file import _allow_standard_directories, normalize_path
 MAX_ENTRIES = 200
 
 
-def use(path=".", max_entries=MAX_ENTRIES):
-    _allow_standard_directories()
-    target = file_commands._resolve(normalize_path(path or "."))
+def use(path=".", max_entries=MAX_ENTRIES, allowed_roots=None):
+    if allowed_roots is None:
+        _allow_standard_directories()
+        path = normalize_path(path or ".")
+    target = file_commands._resolve(path or ".", allowed_roots)
     if not target.exists():
         raise FileNotFoundError(f"Dossier introuvable : {target}")
     if not target.is_dir():

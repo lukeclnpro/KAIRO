@@ -7,7 +7,7 @@ import re
 from html.parser import HTMLParser
 from urllib.error import URLError
 from urllib.parse import parse_qs, quote_plus, urlencode, urlparse
-from urllib.request import Request, urlopen
+from local_ia.http_client import Request, open_url as urlopen
 
 
 SEARCH_URL = "https://html.duckduckgo.com/html/?q="

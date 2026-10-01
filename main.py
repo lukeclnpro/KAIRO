@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import platform
 import shutil
 import subprocess
 import sys
@@ -8,12 +7,17 @@ from pathlib import Path
 
 import json
 import os
-import re
 import time
-from urllib.request import Request, urlopen
+import getpass
+from local_ia.http_client import Request, open_url as urlopen
 from urllib.error import URLError, HTTPError
 
 import ui
+from local_ia.core import accounts
+from local_ia import models as model_manager
+from local_ia import menu as menu_manager
+from local_ia import updater as update_manager
+from local_ia.models import get_model_description
 
 
 # ============================================================
@@ -44,208 +48,6 @@ REMOTE_ZIP_URL = (
     "https://github.com/lukeclnpro/local_ia/"
     "archive/refs/heads/main.zip"
 )
-
-
-# ============================================================
-# MODELES DISPONIBLES A L'INSTALLATION
-# ============================================================
-#
-# La taille et la description affichées ici correspondent
-# aux informations connues pour le modèle.
-#
-# La taille réellement installée sera récupérée par le scan
-# Ollama.
-#
-
-AVAILABLE_MODELS = {
-
-    "Généraliste": [
-        {
-            "name": "qwen3:4b",
-            "size": "~2.5 GB",
-            "description": "Modèle compact polyvalent pour le dialogue, le raisonnement et les tâches générales.",
-        },
-        {
-            "name": "qwen3:8b",
-            "size": "~5.2 GB",
-            "description": "Modèle polyvalent pour dialogue, raisonnement, traduction et tâches générales.",
-        },
-        {
-            "name": "llama3.2:3b",
-            "size": "~2.0 GB",
-            "description": "Petit modèle généraliste conçu pour fonctionner avec peu de ressources.",
-        },
-        {
-            "name": "mistral:7b",
-            "size": "~4.1 GB",
-            "description": "Modèle généraliste adapté au dialogue, à la rédaction et aux tâches quotidiennes.",
-        },
-        {
-            "name": "gemma3:4b",
-            "size": "~3.3 GB",
-            "description": "Modèle compact de Google adapté aux tâches générales et à la vision.",
-        },
-    ],
-
-    "Programmation": [
-        {
-            "name": "qwen2.5-coder:7b",
-            "size": "~4.7 GB",
-            "description": "Génération, correction, compréhension et explication de code.",
-        },
-        {
-            "name": "qwen2.5-coder:14b",
-            "size": "~9 GB",
-            "description": "Version plus puissante pour les projets logiciels complexes.",
-        },
-        {
-            "name": "qwen3-coder:30b",
-            "size": "~19 GB",
-            "description": "Programmation avancée et agents capables de travailler sur des projets logiciels.",
-        },
-        {
-            "name": "deepseek-coder:6.7b",
-            "size": "~4 GB",
-            "description": "Génération et compréhension de nombreux langages de programmation.",
-        },
-        {
-            "name": "codegemma:7b",
-            "size": "~5 GB",
-            "description": "Génération de code et autocomplétion.",
-        },
-        {
-            "name": "codellama:7b",
-            "size": "~4 GB",
-            "description": "Modèle Meta spécialisé dans le code.",
-        },
-    ],
-
-    "Raisonnement": [
-        {
-            "name": "deepseek-r1:7b",
-            "size": "~4.7 GB",
-            "description": "Raisonnement logique, résolution de problèmes et analyse.",
-        },
-        {
-            "name": "deepseek-r1:14b",
-            "size": "~9 GB",
-            "description": "Version plus importante pour les problèmes de raisonnement complexes.",
-        },
-        {
-            "name": "qwen3:14b",
-            "size": "~9 GB",
-            "description": "Raisonnement, logique, analyse et résolution de problèmes.",
-        },
-        {
-            "name": "qwq:32b",
-            "size": "~20 GB",
-            "description": "Modèle orienté raisonnement approfondi.",
-        },
-    ],
-
-    "Mathématiques": [
-        {
-            "name": "qwen2-math:1.5b",
-            "size": "~1 GB",
-            "description": "Résolution de problèmes mathématiques avec faible consommation.",
-        },
-        {
-            "name": "qwen2-math:7b",
-            "size": "~4.4 GB",
-            "description": "Modèle spécialisé dans les problèmes et raisonnements mathématiques.",
-        },
-    ],
-
-    "Vision / Images": [
-        {
-            "name": "gemma3:4b",
-            "size": "~3.3 GB",
-            "description": "Compréhension de texte et analyse d'images.",
-        },
-        {
-            "name": "llama3.2-vision:11b",
-            "size": "~7.9 GB",
-            "description": "Analyse d'images et compréhension visuelle.",
-        },
-        {
-            "name": "qwen2.5vl:7b",
-            "size": "~6 GB",
-            "description": "Vision-langage et analyse de documents visuels.",
-        },
-        {
-            "name": "llava:7b",
-            "size": "~4.7 GB",
-            "description": "Compréhension d'images et questions-réponses visuelles.",
-        },
-    ],
-
-    "Traduction / Multilingue": [
-        {
-            "name": "translategemma:4b",
-            "size": "~3 GB",
-            "description": "Modèle spécialisé dans la traduction multilingue.",
-        },
-        {
-            "name": "qwen3:8b",
-            "size": "~5.2 GB",
-            "description": "Modèle multilingue adapté à la traduction et à la compréhension de nombreuses langues.",
-        },
-    ],
-
-    "RAG / Embeddings": [
-        {
-            "name": "nomic-embed-text",
-            "size": "~0.3 GB",
-            "description": "Embeddings pour recherche sémantique et systèmes RAG.",
-        },
-        {
-            "name": "mxbai-embed-large",
-            "size": "~0.7 GB",
-            "description": "Embeddings pour recherche sémantique et bases vectorielles.",
-        },
-        {
-            "name": "qwen3-embedding:0.6b",
-            "size": "~0.6 GB",
-            "description": "Embeddings Qwen pour recherche sémantique et RAG.",
-        },
-        {
-            "name": "embeddinggemma:300m",
-            "size": "~0.3 GB",
-            "description": "Modèle d'embeddings extrêmement compact.",
-        },
-    ],
-
-    "Sciences / Technique": [
-        {
-            "name": "granite3.3:8b",
-            "size": "~5 GB",
-            "description": "Raisonnement, analyse et tâches techniques.",
-        },
-        {
-            "name": "phi3:mini",
-            "size": "~2.2 GB",
-            "description": "Petit modèle Microsoft pour les tâches techniques et analytiques.",
-        },
-    ],
-
-    "Agents": [
-        {
-            "name": "qwen3:8b",
-            "size": "~5.2 GB",
-            "description": "Adapté aux agents utilisant des outils et exécutant des tâches en plusieurs étapes.",
-        },
-        {
-            "name": "qwen3-coder:30b",
-            "size": "~19 GB",
-            "description": "Agent développeur pour exploration et modification de projets.",
-        },
-        {
-            "name": "granite4.1:8b",
-            "size": "~5 GB",
-            "description": "Modèle orienté agents, RAG, outils et sorties JSON structurées.",
-        },
-    ],
-}
 
 
 # ============================================================
@@ -290,38 +92,7 @@ def check_ollama():
 # ============================================================
 
 def save_model_list(models):
-    """
-    Enregistre les modèles détectés dans list.json.
-    """
-
-    data = {
-        "models": models
-    }
-
-    try:
-
-        with LIST_FILE.open(
-            "w",
-            encoding="utf-8"
-        ) as file:
-
-            json.dump(
-                data,
-                file,
-                indent=4,
-                ensure_ascii=False
-            )
-
-        return True
-
-    except OSError as error:
-
-        print(
-            f"[ERREUR] Impossible d'écrire "
-            f"{LIST_FILE}: {error}"
-        )
-
-        return False
+    return model_manager.save_model_list(models, LIST_FILE)
 
 
 # ============================================================
@@ -329,120 +100,11 @@ def save_model_list(models):
 # ============================================================
 
 def scan_models():
-    """
-    Lance 'ollama list' et récupère :
-
-        - nom
-        - ID
-        - taille
-        - date de modification
-
-    Puis met automatiquement à jour list.json.
-    """
-
-    ollama = get_ollama()
-
-    if ollama is None:
-        return []
-
-    try:
-
-        result = subprocess.run(
-            [ollama, "list"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace"
-        )
-
-    except OSError as error:
-
-        print(
-            f"[ERREUR] Impossible d'exécuter Ollama : "
-            f"{error}"
-        )
-
-        return []
-
-    if result.returncode != 0:
-
-        print(
-            "[ERREUR] Impossible de récupérer "
-            "la liste des modèles."
-        )
-
-        if result.stderr:
-            print(result.stderr.strip())
-
-        return []
-
-    models = []
-
-    lines = result.stdout.splitlines()
-
-    if len(lines) <= 1:
-        save_model_list([])
-        return []
-
-    # --------------------------------------------------------
-    # Première ligne :
-    #
-    # NAME    ID    SIZE    MODIFIED
-    # --------------------------------------------------------
-
-    for line in lines[1:]:
-
-        line = line.strip()
-
-        if not line:
-            continue
-
-        parts = line.split()
-
-        if not parts:
-            continue
-
-        # ----------------------------------------------------
-        # Ollama retourne généralement :
-        #
-        # NAME
-        # ID
-        # SIZE
-        # MODIFIED
-        # ----------------------------------------------------
-
-        name = parts[0]
-        model_id = parts[1] if len(parts) > 1 else ""
-        size = parts[2] if len(parts) > 2 else ""
-
-        modified = " ".join(parts[3:])
-
-        models.append(
-            {
-                "name": name,
-                "id": model_id,
-                "size": size,
-                "modified": modified,
-            }
-        )
-
-    # Élimination des doublons
-    unique_models = []
-
-    seen = set()
-
-    for model in models:
-
-        name = model["name"]
-
-        if name not in seen:
-
-            seen.add(name)
-            unique_models.append(model)
-
-    save_model_list(unique_models)
-
-    return unique_models
+    return model_manager.scan_models(
+        get_ollama(),
+        subprocess.run,
+        save_model_list,
+    )
 
 
 # ============================================================
@@ -486,45 +148,356 @@ def resolve_runtime_provider():
 
 
 def select_runtime_provider():
-    """Demande le fournisseur au lancement sans l'enregistrer dans config.json."""
-    current = resolve_runtime_provider()
-    if current == "openrouter":
-        return
-
-    ui.clear_screen()
-    ui.full_menu(
-        "PROVIDEUR IA",
-        [
-            ("1", "IA locale (Ollama)"),
-            ("2", "OpenRouter (clé API saisie au lancement)"),
-        ],
-        footer="Choisissez le mode d'IA pour cette session : ",
-    )
+    """Affiche le choix initial de compte ou de fournisseur local."""
+    try:
+        saved_session = accounts.load_saved_session()
+    except Exception:
+        saved_session = None
+    if saved_session:
+        username, api_keys = saved_session
+        os.environ["LOCAL_IA_ACCOUNT"] = username
+        os.environ["LOCAL_IA_PROVIDER"] = "openrouter"
+        set_openrouter_session_keys(api_keys)
+        return "openrouter"
 
     while True:
+        ui.clear_screen()
+        ui.brand_logo()
+        names = accounts.list_accounts()
+        if names:
+            print("Comptes locaux : " + ", ".join(names))
+        ui.full_menu(
+            "BIENVENUE DANS KAIRO",
+            [
+                ("1", "Se connecter"),
+                ("2", "Créer un compte"),
+                ("3", "Continuer sans compte (Ollama)"),
+            ],
+            footer="Votre choix : ",
+            clear=False,
+        )
         choice = ui.prompt("Votre choix : ").strip().lower()
 
         if choice == "1":
-            os.environ.pop("LOCAL_IA_PROVIDER", None)
-            os.environ.pop("LOCAL_IA_OPENROUTER_KEY", None)
-            os.environ.pop("LOCAL_IA_OPENROUTER_MODEL", None)
-            os.environ.pop("LOCAL_IA_OPENROUTER_BASE_URL", None)
-            return
+            api_keys = login_openrouter_account()
+            if api_keys:
+                os.environ["LOCAL_IA_PROVIDER"] = "openrouter"
+                set_openrouter_session_keys(api_keys)
+                return "openrouter"
+            continue
 
         if choice == "2":
-            api_key = ui.prompt("Clé API OpenRouter (non stockée localement) : ").strip()
-            if not api_key:
-                ui.print_error("Une clé OpenRouter est requise.")
-                pause()
-                continue
-            os.environ["LOCAL_IA_PROVIDER"] = "openrouter"
-            os.environ["LOCAL_IA_OPENROUTER_KEY"] = api_key
-            os.environ.setdefault("LOCAL_IA_OPENROUTER_MODEL", "openai/gpt-4o-mini")
-            os.environ.setdefault("LOCAL_IA_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-            return
+            api_keys = create_openrouter_account()
+            if api_keys:
+                os.environ["LOCAL_IA_PROVIDER"] = "openrouter"
+                set_openrouter_session_keys(api_keys)
+                return "openrouter"
+            continue
+
+        if choice == "3":
+            try:
+                accounts.clear_saved_session()
+            except Exception:
+                ui.print_info("La session mémorisée n'a pas pu être effacée du trousseau système.")
+            for variable in (
+                "LOCAL_IA_PROVIDER",
+                "LOCAL_IA_OPENROUTER_KEY",
+                "LOCAL_IA_OPENROUTER_KEYS",
+                "LOCAL_IA_ACCOUNT",
+            ):
+                os.environ.pop(variable, None)
+            return "local"
 
         ui.print_error("Choix invalide.")
         pause()
+
+
+def login_openrouter_account():
+    """Authentifie un compte local existant."""
+    names = accounts.list_accounts()
+    if not names:
+        ui.print_error("Aucun compte local. Choisissez « Créer un compte ».")
+        pause()
+        return ""
+    ui.section_title("CONNEXION")
+    print("Comptes disponibles : " + ", ".join(names))
+    username = ui.prompt("Nom du compte : ").strip()
+    if not username:
+        return ""
+    password = getpass.getpass("Mot de passe du compte : ")
+    try:
+        api_keys = accounts.authenticate_api_keys(username, password)
+    except ValueError as error:
+        ui.print_error(str(error))
+        pause()
+        return ""
+    os.environ["LOCAL_IA_ACCOUNT"] = username
+    return api_keys
+
+
+def set_openrouter_session_keys(api_keys):
+    values = [api_keys] if isinstance(api_keys, str) else list(api_keys or [])
+    values = list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
+    if not values:
+        raise ValueError("Aucune clé API OpenRouter n'est disponible.")
+    os.environ["LOCAL_IA_OPENROUTER_KEYS"] = json.dumps(values)
+    os.environ.pop("LOCAL_IA_OPENROUTER_KEY", None)
+    username = os.environ.get("LOCAL_IA_ACCOUNT", "").strip()
+    if username:
+        try:
+            accounts.save_session(username, values)
+        except Exception:
+            ui.print_info("Connexion active, mais la session n'a pas pu être mémorisée par le trousseau système.")
+
+
+def create_openrouter_account():
+    """Crée un compte, puis ouvre ses options API avant validation."""
+    show_account_tutorial()
+    username = ui.prompt("Nom du nouveau compte : ").strip()
+    if not username:
+        return ""
+    password = getpass.getpass("Mot de passe (8 caractères minimum) : ")
+    if len(password) < 8:
+        ui.print_error("Le mot de passe doit contenir au moins 8 caractères.")
+        pause()
+        return ""
+    if any(name.casefold() == username.casefold() for name in accounts.list_accounts()):
+        ui.print_error("Ce nom de compte existe déjà.")
+        pause()
+        return ""
+
+    api_keys = configure_openrouter_api()
+    if not api_keys:
+        return ""
+    try:
+        accounts.create_account(username, password, api_keys)
+    except ValueError as error:
+        ui.print_error(str(error))
+        pause()
+        return ""
+
+    os.environ["LOCAL_IA_ACCOUNT"] = username
+    return api_keys
+
+
+def show_account_tutorial():
+    """Présente les premières étapes avant la création du compte."""
+    pages = (
+        (
+            "01 / COMPTE",
+            "Votre compte KAIRO protège vos réglages et votre clé API sur cet ordinateur.",
+        ),
+        (
+            "02 / API",
+            "Une ou plusieurs clés OpenRouter peuvent répartir les requêtes. Elles sont chiffrées localement et jamais affichées.",
+        ),
+        (
+            "03 / PREMIERS PAS",
+            'Choisissez votre modèle, puis essayez une question normale, iahelp "ma demande" ou /code pour créer un projet.',
+        ),
+    )
+    for heading, description in pages:
+        ui.clear_screen()
+        ui.brand_logo()
+        ui.section_title(heading, clear=False)
+        ui.print_info(description)
+        ui.pause("Entrée pour continuer")
+
+
+def configure_openrouter_api():
+    """Configure la clé et les options API avant de créer le compte."""
+    config = load_config()
+    options = config.setdefault("openrouter", {})
+    api_keys = []
+
+    while True:
+        ui.full_menu(
+            "OPTIONS API OPENROUTER",
+            [
+                ("1", f"Ajouter une clé API ({len(api_keys)} enregistrée(s))"),
+                ("2", f"Modèle : {options.get('model', 'openai/gpt-4o-mini')}"),
+                ("3", f"URL API : {options.get('base_url', 'https://openrouter.ai/api/v1')}"),
+                ("4", f"Timeout : {options.get('timeout', 120)} secondes"),
+                ("0", "Enregistrer et continuer"),
+            ],
+            footer="Votre choix : ",
+        )
+        choice = ui.prompt("Votre choix : ").strip()
+        if choice == "1":
+            api_key = getpass.getpass("Clé API OpenRouter : ").strip()
+            if api_key and api_key not in api_keys:
+                api_keys.append(api_key)
+            elif api_key:
+                ui.print_error("Cette clé est déjà saisie.")
+        elif choice == "2":
+            value = ui.prompt("Modèle OpenRouter : ").strip()
+            if value:
+                options["model"] = value
+        elif choice == "3":
+            value = ui.prompt("URL API OpenRouter : ").strip()
+            if value:
+                options["base_url"] = value.rstrip("/")
+        elif choice == "4":
+            value = ui.prompt("Timeout en secondes : ").strip()
+            try:
+                if value:
+                    options["timeout"] = max(5, int(value))
+            except ValueError:
+                ui.print_error("Le timeout doit être un nombre entier.")
+        elif choice == "0":
+            if not api_keys:
+                ui.print_error("Saisissez au moins une clé API avant de continuer.")
+                pause()
+                continue
+            if not save_config(config):
+                return ""
+            os.environ["LOCAL_IA_OPENROUTER_MODEL"] = str(options.get("model", "openai/gpt-4o-mini"))
+            os.environ["LOCAL_IA_OPENROUTER_BASE_URL"] = str(options.get("base_url", "https://openrouter.ai/api/v1"))
+            return api_keys
+        else:
+            ui.print_error("Choix invalide.")
+
+
+def change_openrouter_key():
+    """Remplace la clé du compte et la chiffre avant son enregistrement."""
+    username = os.environ.get("LOCAL_IA_ACCOUNT", "")
+    if not username:
+        ui.print_error("Aucun compte local n'est connecté.")
+        pause()
+        return
+    password = getpass.getpass("Mot de passe du compte : ")
+    api_key = getpass.getpass("Nouvelle clé API OpenRouter : ").strip()
+    try:
+        accounts.update_api_key(username, password, api_key)
+        set_openrouter_session_keys(accounts.authenticate_api_keys(username, password))
+    except ValueError as error:
+        ui.print_error(str(error))
+        pause()
+        return
+    ui.print_ok("Clé OpenRouter chiffrée et enregistrée pour ce compte.")
+    pause()
+
+
+def manage_local_accounts():
+    """Connecte, cree ou supprime un compte local."""
+    names = accounts.list_accounts()
+    ui.section_title("GESTION DES COMPTES LOCAUX")
+    print("1. Se connecter")
+    print("2. Créer un compte")
+    print("3. Supprimer un compte")
+    print("4. Gérer les clés API")
+    print("0. Retour")
+    choice = ui.prompt("Votre choix : ").strip()
+
+    if choice == "1":
+        api_keys = login_openrouter_account()
+        if api_keys:
+            os.environ["LOCAL_IA_PROVIDER"] = "openrouter"
+            set_openrouter_session_keys(api_keys)
+        return
+
+    if choice == "2":
+        api_keys = create_openrouter_account()
+        if api_keys:
+            os.environ["LOCAL_IA_PROVIDER"] = "openrouter"
+            set_openrouter_session_keys(api_keys)
+        return
+
+    if choice == "4":
+        manage_openrouter_keys()
+        return
+
+    if choice == "3":
+        if not names:
+            ui.print_error("Aucun compte local à supprimer.")
+            pause()
+            return
+        print("Comptes disponibles : " + ", ".join(names))
+        username = ui.prompt("Compte à supprimer : ").strip()
+        password = getpass.getpass("Mot de passe du compte : ")
+        try:
+            accounts.delete_account(username, password)
+        except ValueError as error:
+            ui.print_error(str(error))
+            pause()
+            return
+        if username.casefold() == os.environ.get("LOCAL_IA_ACCOUNT", "").casefold():
+            for variable in ("LOCAL_IA_ACCOUNT", "LOCAL_IA_OPENROUTER_KEY", "LOCAL_IA_OPENROUTER_KEYS", "LOCAL_IA_PROVIDER"):
+                os.environ.pop(variable, None)
+        ui.print_ok("Compte local supprimé.")
+        pause()
+
+
+def manage_openrouter_keys():
+    """Ajoute ou retire des clés du compte local sans les afficher."""
+    names = accounts.list_accounts()
+    if not names:
+        ui.print_error("Aucun compte local disponible.")
+        pause()
+        return
+    current = os.environ.get("LOCAL_IA_ACCOUNT", "")
+    username = current if current.casefold() in {name.casefold() for name in names} else ui.prompt(
+        "Nom du compte : "
+    ).strip()
+    password = getpass.getpass("Mot de passe du compte : ")
+    try:
+        api_keys = accounts.authenticate_api_keys(username, password)
+    except ValueError as error:
+        ui.print_error(str(error))
+        pause()
+        return
+
+    ui.section_title("CLÉS API DU COMPTE")
+    for index, api_key in enumerate(api_keys, start=1):
+        print(f"{index}. Clé OpenRouter ••••{api_key[-4:]}")
+    print("1. Ajouter une clé")
+    print("2. Retirer une clé")
+    print("0. Retour")
+    choice = ui.prompt("Votre choix : ").strip()
+
+    try:
+        if choice == "1":
+            new_key = getpass.getpass("Nouvelle clé API OpenRouter : ").strip()
+            accounts.add_api_key(username, password, new_key)
+            ui.print_ok("Clé ajoutée et chiffrée.")
+        elif choice == "2":
+            index = int(ui.prompt("Numéro de clé à retirer : ").strip())
+            accounts.remove_api_key(username, password, index)
+            ui.print_ok("Clé retirée.")
+        else:
+            return
+        if username.casefold() == current.casefold():
+            set_openrouter_session_keys(accounts.authenticate_api_keys(username, password))
+    except (ValueError, TypeError) as error:
+        ui.print_error(str(error))
+    pause()
+
+
+def show_openrouter_key_usage():
+    """Affiche les statistiques de la clé OpenRouter active."""
+    from local_ia.llm.ollama import get_openrouter_key_usage
+
+    try:
+        usage = get_openrouter_key_usage()
+    except Exception as error:
+        ui.print_error(f"Impossible de récupérer l'utilisation OpenRouter : {error}")
+        pause()
+        return
+
+    ui.section_title("UTILISATION DE LA CLÉ OPENROUTER")
+    if usage.get("label"):
+        print(f"Clé : {usage['label']}")
+    if usage.get("usage") is not None:
+        print(f"Utilisation totale : ${float(usage['usage']):.4f}")
+    if usage.get("limit") is not None:
+        print(f"Limite : ${float(usage['limit']):.4f}")
+    if usage.get("limit_remaining") is not None:
+        print(f"Limite restante : ${float(usage['limit_remaining']):.4f}")
+    for period in ("daily", "weekly", "monthly"):
+        value = usage.get(f"usage_{period}")
+        if value is not None:
+            print(f"Utilisation {period} : ${float(value):.4f}")
+    pause()
 
 def save_config(config):
     """
@@ -674,10 +647,10 @@ def launch_ai():
                 "[ERREUR] Aucun modèle Ollama installé."
             )
 
-            print(
-                "Installez d'abord un modèle avec "
-                "l'option 3."
-            )
+            if get_ollama() is None:
+                print("Ollama est facultatif. Utilisez l'option 10 pour configurer un compte API.")
+            else:
+                print("Installez d'abord un modèle avec l'option 3.")
 
             return
 
@@ -770,7 +743,7 @@ def launch_ai():
     print()
     ui.section_title("LANCEMENT IA", clear=False)
     print(
-        ui.colorize(f"Modèle utilisé : ", ui.C.SUBTITLE)
+        ui.colorize("Modèle utilisé : ", ui.C.SUBTITLE)
         + ui.colorize(selected_model, ui.C.OK)
     )
 
@@ -817,65 +790,23 @@ def launch_ai():
 # ============================================================
 
 def load_json_file(path):
-    """Charge un fichier JSON local."""
-    try:
-        with path.open("r", encoding="utf-8") as file:
-            return json.load(file)
-    except (OSError, json.JSONDecodeError):
-        return None
+    return update_manager.load_json_file(path)
 
 
 def get_current_version():
-    """Retourne la version installée localement."""
-    data = load_json_file(VERSION_FILE)
+    return update_manager.get_current_version(VERSION_FILE)
 
-    if not data:
-        return "0.0.0"
 
-    return str(data.get("version", "0.0.0"))
+def _required_update_files(source_dir):
+    return update_manager.required_update_files(source_dir)
 
 
 def download_json(url):
-    """Télécharge un fichier JSON depuis GitHub."""
-    try:
-        import urllib.request
-
-        request = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": "Local-IA-Updater"
-            }
-        )
-
-        with urllib.request.urlopen(
-            request,
-            timeout=10
-        ) as response:
-
-            content = response.read().decode("utf-8")
-
-        return json.loads(content)
-
-    except Exception as error:
-        print()
-        ui.print_error(
-            f"Impossible de récupérer les informations : {error}"
-        )
-        return None
+    return update_manager.download_json(url, ui)
 
 
 def version_to_tuple(version):
-    """
-    Transforme une version du type 1.2.3
-    en tuple comparable.
-    """
-    try:
-        parts = re.findall(r"\d+", str(version).strip().lstrip("v"))
-        if parts:
-            return tuple(int(part) for part in parts)
-    except (ValueError, TypeError):
-        pass
-    return (0, 0, 0)
+    return update_manager.version_to_tuple(version)
 
 
 def check_for_update(show_message=True):
@@ -898,521 +829,25 @@ def check_for_update(show_message=True):
     if remote_data is None:
         return None, None
 
-    remote_version = str(
-        remote_data.get(
-            "version",
-            current_version
-        )
+    return update_manager.check_for_update(
+        current_version,
+        remote_data,
+        show_message,
+        ui,
     )
-
-    current_tuple = version_to_tuple(
-        current_version
-    )
-
-    remote_tuple = version_to_tuple(
-        remote_version
-    )
-
-    if remote_tuple > current_tuple:
-
-        if show_message:
-            print()
-
-            ui.print_warn(
-                "Une nouvelle version est disponible !"
-            )
-
-            print(
-                f"Version installée : {current_version}"
-            )
-
-            print(
-                f"Nouvelle version  : {remote_version}"
-            )
-
-        return True, remote_version
-
-    if show_message:
-        print()
-
-        ui.print_ok(
-            f"Vous utilisez déjà la dernière version "
-            f"({current_version})."
-        )
-
-    return False, current_version
 
 
 def update_program():
-    """
-    Télécharge la dernière version du dépôt GitHub.
-
-    Fichiers mis à jour :
-        - tous les fichiers Python (.py)
-        - tous les fichiers HTML/CSS/JS du dossier web/
-        - version.json
-        - update.json
-
-    Les autres fichiers locaux, les configurations,
-    les conversations et les autres données utilisateur
-    ne sont jamais remplacés.
-    """
-    ui.clear_screen()
-
-    print()
-
-    ui.section_title(
-        "MISE À JOUR",
-        clear=False
+    return update_manager.update_program(
+        BASE_DIR,
+        REMOTE_ZIP_URL,
+        ui,
+        pause,
+        check_for_update,
+        _required_update_files,
+        get_current_version,
+        version_to_tuple,
     )
-
-    print(
-        "Vérification de la dernière version..."
-    )
-
-    update_available, version = check_for_update(
-        show_message=True
-    )
-
-    if update_available is None:
-        pause()
-        return
-
-    if not update_available:
-        pause()
-        return
-
-    print()
-
-    confirmation = ui.prompt(
-        f"Installer la version {version} ? (o/N) : "
-    ).strip().lower()
-
-    if confirmation != "o":
-        ui.print_warn(
-            "Mise à jour annulée."
-        )
-        pause()
-        return
-
-    print()
-
-    ui.print_info(
-        "Téléchargement des fichiers de mise à jour..."
-    )
-
-    import tempfile
-    import zipfile
-    import urllib.request
-
-    try:
-
-        with tempfile.TemporaryDirectory() as temp:
-
-            temp_dir = Path(temp)
-
-            zip_path = temp_dir / "update.zip"
-
-            # =================================================
-            # TÉLÉCHARGEMENT DE L'ARCHIVE GITHUB
-            # =================================================
-
-            request = urllib.request.Request(
-                REMOTE_ZIP_URL,
-                headers={
-                    "User-Agent": "Local-IA-Updater"
-                }
-            )
-
-            with urllib.request.urlopen(
-                request,
-                timeout=60
-            ) as response:
-
-                with zip_path.open(
-                    "wb"
-                ) as file:
-
-                    file.write(
-                        response.read()
-                    )
-
-            # =================================================
-            # EXTRACTION
-            # =================================================
-
-            extract_dir = temp_dir / "extracted"
-
-            extract_dir.mkdir()
-
-            with zipfile.ZipFile(
-                zip_path,
-                "r"
-            ) as archive:
-
-                archive.extractall(
-                    extract_dir
-                )
-
-            source_dirs = list(
-                extract_dir.iterdir()
-            )
-
-            if len(source_dirs) != 1:
-
-                raise RuntimeError(
-                    "Structure de l'archive GitHub invalide."
-                )
-
-            source_dir = source_dirs[0]
-
-            # =================================================
-            # RECHERCHE DES FICHIERS À METTRE À JOUR
-            # =================================================
-            #
-            # On récupère :
-            #
-            #   - tous les .py
-            #   - version.json
-            #   - update.json
-            #
-            # Les autres JSON ne sont PAS touchés.
-            #
-
-            update_files = []
-
-            # -------------------------------------------------
-            # FICHIERS PYTHON
-            # -------------------------------------------------
-
-            for source_path in source_dir.rglob("*.py"):
-
-                if not source_path.is_file():
-                    continue
-
-                relative_path = (
-                    source_path.relative_to(
-                        source_dir
-                    )
-                )
-
-                # Ne jamais récupérer les fichiers Python
-                # présents dans certains dossiers inutiles.
-                if any(
-                    part in {
-                        ".git",
-                        "__pycache__",
-                        ".github",
-                    }
-                    for part in relative_path.parts
-                ):
-                    continue
-
-                update_files.append(
-                    relative_path
-                )
-
-            # -------------------------------------------------
-            # FICHIERS WEB (HTML / CSS / JS)
-            # -------------------------------------------------
-            #
-            # L'interface web fait partie intégrante du programme.
-            # On installe donc automatiquement tous les fichiers
-            # .html, .css et .js du dossier web/.
-            #
-            # Les autres fichiers présents dans web/ ne sont pas
-            # remplacés par le service de mise à jour.
-            #
-
-            for source_path in (source_dir / "web").rglob("*"):
-                if not source_path.is_file():
-                    continue
-
-                if source_path.suffix.lower() not in {
-                    ".html",
-                    ".css",
-                    ".js",
-                }:
-                    continue
-
-                relative_path = source_path.relative_to(source_dir)
-
-                update_files.append(relative_path)
-
-            # -------------------------------------------------
-            # FICHIERS JSON AUTORISÉS
-            # -------------------------------------------------
-
-            json_files = [
-                Path("version.json"),
-                Path("update.json"),
-            ]
-
-            for relative_path in json_files:
-
-                source_path = (
-                    source_dir / relative_path
-                )
-
-                if not source_path.is_file():
-
-                    raise RuntimeError(
-                        f"Le fichier {relative_path} "
-                        "est absent du dépôt GitHub."
-                    )
-
-                update_files.append(
-                    relative_path
-                )
-
-            # -------------------------------------------------
-            # SUPPRESSION DES DOUBLONS
-            # -------------------------------------------------
-
-            update_files = list(
-                dict.fromkeys(update_files)
-            )
-
-            if not update_files:
-
-                raise RuntimeError(
-                    "Aucun fichier à mettre à jour trouvé."
-                )
-
-            # =================================================
-            # AFFICHAGE
-            # =================================================
-
-            print()
-
-            ui.print_info(
-                f"{len(update_files)} fichier(s) "
-                "à mettre à jour."
-            )
-
-            print()
-
-            for relative_path in update_files:
-
-                if relative_path.suffix == ".py":
-
-                    label = "Python"
-
-                elif relative_path == Path("version.json"):
-
-                    label = "Version"
-
-                elif relative_path == Path("update.json"):
-
-                    label = "Nouveautés"
-
-                elif relative_path.parts and relative_path.parts[0] == "web":
-
-                    label = {
-                        ".html": "HTML",
-                        ".css": "CSS",
-                        ".js": "JavaScript",
-                    }.get(
-                        relative_path.suffix.lower(),
-                        "Web",
-                    )
-
-                else:
-
-                    label = "Fichier"
-
-                print(
-                    f"  • {relative_path} ({label})"
-                )
-
-            print()
-
-            # =================================================
-            # SAUVEGARDE DES FICHIERS ACTUELS
-            # =================================================
-
-            backup_dir = (
-                temp_dir / "backup"
-            )
-
-            backup_dir.mkdir()
-
-            existing_files = []
-
-            for relative_path in update_files:
-
-                destination = (
-                    BASE_DIR / relative_path
-                )
-
-                if destination.exists():
-
-                    backup_path = (
-                        backup_dir / relative_path
-                    )
-
-                    backup_path.parent.mkdir(
-                        parents=True,
-                        exist_ok=True
-                    )
-
-                    shutil.copy2(
-                        destination,
-                        backup_path
-                    )
-
-                    existing_files.append(
-                        relative_path
-                    )
-
-            # =================================================
-            # INSTALLATION DES FICHIERS
-            # =================================================
-
-            try:
-
-                for relative_path in update_files:
-
-                    source = (
-                        source_dir / relative_path
-                    )
-
-                    destination = (
-                        BASE_DIR / relative_path
-                    )
-
-                    destination.parent.mkdir(
-                        parents=True,
-                        exist_ok=True
-                    )
-
-                    shutil.copy2(
-                        source,
-                        destination
-                    )
-
-            except Exception:
-
-                # ---------------------------------------------
-                # RESTAURATION EN CAS D'ERREUR
-                # ---------------------------------------------
-
-                ui.print_error(
-                    "Erreur pendant la mise à jour."
-                )
-
-                for relative_path in existing_files:
-
-                    backup_path = (
-                        backup_dir / relative_path
-                    )
-
-                    destination = (
-                        BASE_DIR / relative_path
-                    )
-
-                    if backup_path.exists():
-
-                        destination.parent.mkdir(
-                            parents=True,
-                            exist_ok=True
-                        )
-
-                        shutil.copy2(
-                            backup_path,
-                            destination
-                        )
-
-                raise
-
-            # =================================================
-            # VÉRIFICATION DE VERSION
-            # =================================================
-
-            installed_version = get_current_version()
-
-            if version_to_tuple(installed_version) != version_to_tuple(version):
-
-                ui.print_warn(
-                    "Attention : la version installée "
-                    "ne correspond pas à la version téléchargée."
-                )
-
-                print(
-                    f"Version attendue : {version}"
-                )
-
-                print(
-                    f"Version installée : {installed_version}"
-                )
-
-            # =================================================
-            # FIN
-            # =================================================
-
-            print()
-
-            ui.print_ok(
-                f"Programme mis à jour vers la version {version}."
-            )
-
-            print()
-
-            ui.print_info(
-                "Fichiers Python mis à jour."
-            )
-
-            ui.print_info(
-                "Fichiers HTML/CSS/JS de l'interface web mis à jour."
-            )
-
-            ui.print_info(
-                "version.json mis à jour."
-            )
-
-            ui.print_info(
-                "update.json mis à jour."
-            )
-
-            print()
-
-            ui.print_info(
-                "Vos autres fichiers JSON, configurations "
-                "et conversations ont été conservés."
-            )
-
-            print()
-
-            ui.print_info(
-                "Redémarrez le programme pour appliquer "
-                "complètement la mise à jour."
-            )
-
-            pause()
-
-    except urllib.error.URLError as error:
-
-        ui.print_error(
-            f"Erreur réseau : {error}"
-        )
-
-        pause()
-
-    except zipfile.BadZipFile:
-
-        ui.print_error(
-            "L'archive téléchargée est invalide."
-        )
-
-        pause()
-
-    except Exception as error:
-
-        ui.print_error(
-            f"La mise à jour a échoué : {error}"
-        )
-
-        pause()
 
 
 # ============================================================
@@ -1432,7 +867,6 @@ def force_update():
     ui.clear_screen()
     import tempfile
     import zipfile
-    import urllib.request
     import textwrap
 
     print()
@@ -1454,12 +888,12 @@ def force_update():
     try:
         ui.print_info("Téléchargement complet du dépôt GitHub...")
 
-        request = urllib.request.Request(
+        request = Request(
             REMOTE_ZIP_URL,
             headers={"User-Agent": "Local-IA-Force-Updater"},
         )
 
-        with urllib.request.urlopen(request, timeout=120) as response:
+        with urlopen(request, timeout=120) as response:
             with zip_path.open("wb") as file:
                 shutil.copyfileobj(response, file)
 
@@ -1627,12 +1061,13 @@ def show_updates():
     # TRI : PLUS RÉCENTE EN PREMIER
     # --------------------------------------------------------
 
-        versions = sorted(
-            versions,
-            key=lambda item: version_to_tuple(
-                item.get("version", "0.0.0")
-            )
-        )
+    versions = sorted(
+        versions,
+        key=lambda item: version_to_tuple(
+            item.get("version", "0.0.0")
+        ),
+        reverse=True,
+    )
 
     # --------------------------------------------------------
     # AFFICHAGE
@@ -1761,360 +1196,25 @@ def list_models():
 # DESCRIPTION DES MODELES
 # ============================================================
 
-def get_model_description(model_name):
-    for category_models in AVAILABLE_MODELS.values():
-        for model in category_models:
-            if model.get("name") == model_name:
-                return model.get("description", "")
-
-    return ""
-
-
 # ============================================================
 # 3 - INSTALLER UN MODELE
 # ============================================================
 
 def install_model():
-    """
-    Menu spécialisé d'installation des modèles.
-    """
-
-    installed = scan_models()
-
-    installed_names = {
-        model["name"]
-        for model in installed
-    }
-
-    while True:
-
-        categories = list(AVAILABLE_MODELS.keys())
-
-        options = [
-            (str(number), category)
-            for number, category in enumerate(categories, start=1)
-        ]
-        options.append(("0", "Retour"))
-
-        ui.full_menu(
-            "INSTALLER UN MODÈLE",
-            options,
-            footer="Choisissez une catégorie",
-        )
-
-        choice = ui.prompt("Votre choix : ").strip()
-
-        if not choice.isdigit():
-            ui.print_error("Choix invalide.")
-            pause()
-            continue
-
-        category_number = int(choice)
-
-        if category_number == 0:
-            return
-
-        if (
-            category_number < 1
-            or category_number > len(categories)
-        ):
-            ui.print_error("Choix invalide.")
-            pause()
-            continue
-
-        category = categories[category_number - 1]
-
-        models = [
-            model
-            for model in AVAILABLE_MODELS[category]
-            if model["name"] not in installed_names
-        ]
-
-        # ----------------------------------------------------
-        # Tous les modèles de cette catégorie sont déjà
-        # installés.
-        # ----------------------------------------------------
-
-        if not models:
-
-            print()
-            ui.print_info(
-                "Tous les modèles de cette catégorie sont déjà installés."
-            )
-
-            pause()
-            continue
-
-        # ----------------------------------------------------
-        # MENU DES MODELES
-        # ----------------------------------------------------
-
-        while True:
-
-            model_options = [
-                (
-                    str(number),
-                    f"{model['name']}  ({model['size']}) — {model['description']}",
-                )
-                for number, model in enumerate(models, start=1)
-            ]
-            model_options.append(("0", "Retour"))
-
-            ui.full_menu(
-                category.upper(),
-                model_options,
-                footer="Choisissez un modèle à installer",
-            )
-
-            model_choice = ui.prompt("Votre choix : ").strip()
-
-            if not model_choice.isdigit():
-
-                ui.print_error("Choix invalide.")
-
-                pause()
-                continue
-
-            model_number = int(model_choice)
-
-            if model_number == 0:
-                break
-
-            if (
-                model_number < 1
-                or model_number > len(models)
-            ):
-
-                ui.print_error("Choix invalide.")
-
-                pause()
-                continue
-
-            selected = models[model_number - 1]
-
-            # ------------------------------------------------
-            # CONFIRMATION
-            # ------------------------------------------------
-
-            ui.section_title("INSTALLATION")
-
-            print(
-                ui.colorize("Modèle : ", ui.C.SUBTITLE)
-                + ui.colorize(selected["name"], ui.C.OK)
-            )
-
-            print(
-                ui.colorize(f"Taille : {selected['size']}", ui.C.WHITE)
-            )
-
-            print()
-
-            print(
-                ui.colorize(selected["description"], ui.C.SUBTITLE)
-            )
-
-            print()
-
-            confirmation = ui.prompt(
-                "Installer ce modèle ? (o/N) : "
-            ).strip().lower()
-
-            if confirmation != "o":
-
-                ui.print_warn("Installation annulée.")
-
-                pause()
-                continue
-
-            # ------------------------------------------------
-            # INSTALLATION OLLAMA
-            # ------------------------------------------------
-
-            ollama = get_ollama()
-
-            if ollama is None:
-
-                print(
-                    "\n[ERREUR] Ollama introuvable."
-                )
-
-                pause()
-                return
-
-            print()
-            ui.print_info(f"Installation de {selected['name']}...")
-            print()
-
-            try:
-
-                result = subprocess.run(
-                    [
-                        ollama,
-                        "pull",
-                        selected["name"]
-                    ]
-                )
-
-            except KeyboardInterrupt:
-
-                ui.print_info("Installation interrompue.")
-
-                pause()
-                continue
-
-            except OSError as error:
-
-                ui.print_error(str(error))
-
-                pause()
-                continue
-
-            if result.returncode != 0:
-
-                ui.print_error("L'installation a échoué.")
-
-                pause()
-                continue
-
-            print()
-            ui.print_ok(f"{selected['name']} est installé.")
-
-            # ------------------------------------------------
-            # RESCAN
-            # ------------------------------------------------
-
-            installed = scan_models()
-
-            installed_names = {
-                model["name"]
-                for model in installed
-            }
-
-            pause()
-
-            # Retour au menu des catégories
-            break
+    return model_manager.install_model(ui, scan_models, get_ollama, subprocess.run, pause)
 
 # ============================================================
 # 4 - DESINSTALLER UN MODELE
 # ============================================================
 
 def uninstall_model():
-    """
-    Effectue un scan puis permet de supprimer
-    un modèle installé.
-    """
-    ui.clear_screen()
-
-    installed = scan_models()
-
-    print()
-
-    if not installed:
-
-        ui.section_title("MODÈLES INSTALLÉS", clear=False)
-        ui.print_warn("Aucun modèle installé.")
-
-        return
-
-    options = []
-
-    for number, model in enumerate(installed, start=1):
-
-        description = get_model_description(model["name"])
-        label = f"{model['name']}  ({model['size']})"
-
-        if description:
-            label += f" — {description}"
-
-        options.append((str(number), label))
-
-    options.append(("0", "Annuler"))
-
-    ui.full_menu(
-        "MODÈLES INSTALLÉS",
-        options,
-        footer="Choisissez un modèle à désinstaller",
+    return model_manager.uninstall_model(
+        ui,
+        scan_models,
+        get_ollama,
+        subprocess.run,
+        get_model_description,
     )
-
-    choice = ui.prompt("Votre choix : ").strip()
-
-    if not choice.isdigit():
-
-        ui.print_error("Choix invalide.")
-        return
-
-    number = int(choice)
-
-    if number == 0:
-        return
-
-    if number < 1 or number > len(installed):
-
-        ui.print_error("Choix invalide.")
-        return
-
-    selected = installed[number - 1]
-
-    model_name = selected["name"]
-
-    ui.section_title("DÉSINSTALLATION")
-    print(
-        ui.colorize("Modèle : ", ui.C.SUBTITLE)
-        + ui.colorize(model_name, ui.C.ERROR)
-    )
-    print(ui.colorize(f"Taille : {selected['size']}", ui.C.WHITE))
-    print()
-
-    confirmation = ui.prompt(
-        "Confirmer la désinstallation ? (o/N) : "
-    ).strip().lower()
-
-    if confirmation != "o":
-
-        ui.print_warn("Désinstallation annulée.")
-        return
-
-    ollama = get_ollama()
-
-    if ollama is None:
-
-        ui.print_error("Ollama est introuvable.")
-
-        return
-
-    print()
-    ui.print_info(f"Désinstallation de {model_name}...")
-
-    try:
-
-        result = subprocess.run(
-            [ollama, "rm", model_name]
-        )
-
-    except KeyboardInterrupt:
-
-        ui.print_info("Désinstallation interrompue.")
-
-        return
-
-    except OSError as error:
-
-        ui.print_error(str(error))
-
-        return
-
-    if result.returncode != 0:
-
-        ui.print_error("La désinstallation a échoué.")
-
-        return
-
-    print()
-    ui.print_ok(f"{model_name} désinstallé.")
-
-    # Rescan après désinstallation
-    scan_models()
 
 
 # ============================================================
@@ -2406,29 +1506,31 @@ def get_version():
         with open(version_file, "r", encoding="utf-8") as file:
             data = json.load(file)
 
-        return data.get("version", "Inconnue")
+        return (
+            data.get("version", "Inconnue"),
+            data.get("patch", "Inconnu"),
+            data.get("modified_at", "Date inconnue"),
+        )
 
     except (FileNotFoundError, json.JSONDecodeError):
-        return "Inconnue"
+        return "Inconnue", "Inconnu", "Date inconnue"
+
+
+def get_main_menu_options(provider=None):
+    provider = provider or resolve_runtime_provider()
+    return menu_manager.get_main_menu_options(provider)
+
 
 def menu():
 
     while True:
-        version = get_version()
+        version, patch, modified_at = get_version()
+        provider = resolve_runtime_provider()
 
         ui.full_menu(
-            f"OLLAMA LOCAL AI - v{version}",
-            [
-                ("1", "Lancer l'IA locale"),
-                ("2", "Lister les modèles"),
-                ("3", "Installer un modèle"),
-                ("4", "Désinstaller un modèle"),
-                ("5", "Modifier la configuration de l'IA"),
-                ("6", "Lancer sur le serveur"),
-                ("7", "Mettre à jour le programme"),
-                ("8", "Voir les nouveautés"),
-                ("0", "Quitter"),
-            ],
+            f"{ui.PRODUCT_NAME} - v{version}",
+            get_main_menu_options(provider),
+            subtitle=f"Patch {patch} · Modifié le {modified_at}",
             footer="Votre choix : ",
         )
 
@@ -2445,18 +1547,31 @@ def menu():
             launch_ai()
             pause()
 
-        elif choice == "2":
+        elif choice == "2" and provider == "openrouter":
+
+            change_openrouter_key()
+
+        elif choice == "3" and provider == "openrouter":
+
+            show_openrouter_key_usage()
+
+        elif choice == "2" and provider != "openrouter":
 
             list_models()
             pause()
 
-        elif choice == "3":
+        elif choice == "3" and provider != "openrouter":
 
             install_model()
 
-        elif choice == "4":
+        elif choice == "4" and provider != "openrouter":
 
             uninstall_model()
+            pause()
+
+        elif choice in {"2", "3", "4"}:
+
+            ui.print_error("La gestion des modèles Ollama est indisponible avec OpenRouter.")
             pause()
 
         elif choice == "5":
@@ -2474,6 +1589,21 @@ def menu():
         elif choice == "8":
 
             show_updates()
+
+        elif choice == "9":
+
+            from local_ia.core.code_projects import open_code_projects
+
+            try:
+                project_folder = open_code_projects()
+                ui.print_ok(f"Dossier des projets de code : {project_folder}")
+            except (FileNotFoundError, OSError) as error:
+                ui.print_error(f"Impossible d'ouvrir le dossier des projets : {error}")
+            pause()
+
+        elif choice == "10":
+
+            manage_local_accounts()
 
         elif choice == "0":
 
@@ -2493,60 +1623,7 @@ def menu():
 
 
 def show_help():
-    """Affiche les commandes disponibles de LOCAL_IA."""
-    print()
-    print("=" * 72)
-    print("LOCAL_IA - COMMANDES DISPONIBLES")
-    print("=" * 72)
-    print()
-    print("COMMANDES PRINCIPALES")
-    print("  python main.py")
-    print("      Lance LOCAL_IA et affiche le menu principal.")
-    print()
-    print("  python main.py help")
-    print("      Affiche cette aide et la liste des commandes disponibles.")
-    print()
-    print("  python main.py -h")
-    print("  python main.py --help")
-    print("      Affiche également cette aide.")
-    print()
-    print("  python main.py force_update")
-    print("      Force une réinstallation complète depuis GitHub.")
-    print("      Tout est remplacé sauf :")
-    print("        - _chats/")
-    print("        - _config.json")
-    print("        - _list.json")
-    print("        - _context.json")
-    print()
-    print("SCRIPTS UTILITAIRES")
-    print("  python setup.py")
-    print("      Installe LOCAL_IA sur l'ordinateur.")
-    print()
-    print("  python uninstall.py")
-    print("      Désinstalle LOCAL_IA. Le script permet de choisir")
-    print("      séparément la suppression de LOCAL_IA, des modèles")
-    print("      Ollama et d'Ollama lui-même.")
-    print()
-    print("  python config.py")
-    print("      Permet de modifier la configuration de l'IA.")
-    print()
-    print("  python ollama_test.py")
-    print("      Vérifie l'installation et l'accessibilité d'Ollama.")
-    print()
-    print("MENU LOCAL_IA")
-    print("  Une fois 'python main.py' lancé, le menu permet notamment de :")
-    print("    1 - Lancer l'IA locale")
-    print("    2 - Lister les modèles")
-    print("    3 - Installer un modèle")
-    print("    4 - Désinstaller un modèle")
-    print("    5 - Modifier la configuration de l'IA")
-    print("    6 - Lancer le serveur")
-    print("    7 - Mettre à jour le programme")
-    print("    8 - Voir les nouveautés")
-    print("    0 - Quitter")
-    print()
-    print("=" * 72)
-    print()
+    return menu_manager.show_help()
 
 
 # ============================================================
@@ -2560,6 +1637,16 @@ def main():
     if len(sys.argv) > 1:
         command = sys.argv[1].strip().lower()
 
+        if command in {"gui", "--gui"}:
+            from local_ia.gui import run_gui
+
+            return run_gui()
+
+        if command == "--tray":
+            from local_ia.desktop_tray import run_tray
+
+            return run_tray()
+
         if command in {"help", "-h", "--help"}:
             show_help()
             return 0
@@ -2567,17 +1654,29 @@ def main():
         if command == "force_update":
             return force_update()
 
-    ui.section_title("OLLAMA LOCAL AI")
+        if command == "iahelp":
+            from local_ia.cli.iahelp import main as iahelp_main
 
-    select_runtime_provider()
+            return iahelp_main(sys.argv[2:])
 
-    if resolve_runtime_provider() == "local":
-        if not check_ollama():
-            pause()
-            sys.exit(1)
+    if (
+        not os.environ.get("LOCAL_IA_GUI_CHILD")
+        and (sys.platform.startswith("linux") or os.name == "nt")
+    ):
+        from local_ia.desktop_tray import start_tray
 
-        # Scan automatique au démarrage uniquement en mode local
-        scan_models()
+        start_tray()
+
+    ui.brand_logo()
+    ui.section_title(f"{ui.PRODUCT_NAME} · IA LOCALE", clear=False)
+
+    provider = select_runtime_provider()
+
+    if provider == "local":
+        if check_ollama():
+            scan_models()
+        else:
+            ui.print_info("Ollama n'est pas installé. Le menu reste disponible pour utiliser un compte API.")
 
     menu()
 

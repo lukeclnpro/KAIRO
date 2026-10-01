@@ -1,0 +1,112 @@
+POSSIBILITES DES MENUS KAIRO
+============================
+
+Comptage des choix affiches dans le code. Les choix de retour et de sortie sont inclus lorsqu'ils apparaissent dans le menu. Les confirmations oui/non et les champs de saisie ne sont pas comptes comme des menus.
+
+MENUS GENERAUX
+--------------
+Accueil : 3 choix
+- Se connecter
+- Creer un compte
+- Continuer sans compte (Ollama)
+
+Menu principal en mode local : 11 choix
+- Lancer l'IA locale
+- Lister les modeles
+- Installer un modele
+- Desinstaller un modele
+- Modifier la configuration de l'IA
+- Lancer sur le serveur
+- Mettre a jour le programme
+- Voir les nouveautes
+- Ouvrir les projets de code
+- Gerer les comptes locaux
+- Quitter
+
+Menu principal avec OpenRouter : 10 choix
+- Lancer l'IA locale
+- Modifier la cle API OpenRouter
+- Voir l'utilisation de la cle API
+- Modifier la configuration de l'IA
+- Lancer sur le serveur
+- Mettre a jour le programme
+- Voir les nouveautes
+- Ouvrir les projets de code
+- Gerer les comptes locaux
+- Quitter
+
+COMPTES ET CLES API
+-------------------
+Gestion des comptes locaux : 5 choix
+1. Se connecter
+2. Creer un compte
+3. Supprimer un compte
+4. Gerer les cles API
+0. Retour
+
+Gestion des cles API : 3 choix
+1. Ajouter une cle
+2. Retirer une cle
+0. Retour
+
+Options OpenRouter a la creation d'un compte : 5 choix
+1. Ajouter une cle API
+2. Choisir le modele
+3. Choisir l'URL API
+4. Choisir le timeout
+0. Enregistrer et continuer
+
+CONFIGURATION DE L'IA
+---------------------
+Menu de configuration : 13 choix
+1. Utilisateur
+2. Assistant
+3. Regles
+4. Instructions personnalisees
+5. Ollama
+6. OpenRouter
+7. Conversation
+8. Memoire
+9. Recherche
+10. Afficher la configuration
+11. Reinitialiser la configuration
+12. Sauvegarder
+0. Retour vers main.py
+
+Sous-menus de configuration : 56 choix cumules
+- Utilisateur : 3 (langue, nom, retour)
+- Assistant : 7 (role, sujet, ton, style, niveau de detail, reponses concises, retour)
+- Regles : 11 (options de regles; le menu n'affiche pas de choix Retour)
+- Instructions personnalisees : 5 (ajouter, modifier, supprimer, remplacer tout, retour)
+- Ollama : 5 (URL, modele, timeout, streaming, retour)
+- OpenRouter : 7 (compte/cle, modele, URL, timeout, site URL, nom de l'application, retour)
+- Conversation : 7 (historique, nombre de conversations, message de demarrage, sujet automatique, limites du sujet, retour)
+- Memoire : 5 (activer, nombre de souvenirs, detection automatique, sauvegarde automatique, retour)
+- Recherche : 6 (activer, moteur, resultats, timeout, User-Agent, retour)
+
+Modeles : menu de 10 choix (9 categories et Retour)
+- Generaliste : 5 modeles
+- Programmation : 6 modeles
+- Raisonnement : 4 modeles
+- Mathematiques : 2 modeles
+- Vision / Images : 4 modeles
+- Traduction / Multilingue : 2 modeles
+- RAG / Embeddings : 4 modeles
+- Sciences / Technique : 2 modeles
+- Agents : 3 modeles
+Total catalogue : 32 modeles proposes, certains apparaissent dans plusieurs categories.
+
+MENUS VARIABLES
+---------------
+- Choix d'un modele a installer : nombre de modeles non installes dans la categorie choisie + 1 choix Retour. Si tous les modeles de la categorie sont deja installes, ce sous-menu n'apparait pas.
+- Lancement ou desinstallation d'un modele local : nombre de modeles installes + 1 choix Annuler/Retour. Le menu n'apparait que si des modeles sont installes.
+- Selection d'une conversation : nombre de conversations enregistrees + 2 choix (nouvelle conversation et retour).
+- Modification ou suppression d'instructions : le sous-menu affiche une entree par instruction deja enregistree.
+
+TOTAL CUMULE INDICATIF
+----------------------
+En additionnant les choix des menus fixes listes ci-dessus, sans compter les menus variables de modeles, conversations et instructions :
+- Mode local : 106 choix affichables sur l'ensemble des ecrans.
+- Mode OpenRouter : 105 choix affichables sur l'ensemble des ecrans.
+
+Ce total additionne plusieurs ecrans et parcours alternatifs; ce n'est pas le nombre de choix visibles simultanement dans un seul menu.

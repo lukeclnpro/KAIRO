@@ -17,6 +17,7 @@ import sys
 import os
 
 import ui
+from local_ia.core import accounts
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -57,7 +58,6 @@ DEFAULT_CONFIG = {
         "stream": False,
     },
     "openrouter": {
-        "api_key": "",
         "model": "openai/gpt-4o-mini",
         "base_url": "https://openrouter.ai/api/v1",
         "timeout": 120,
@@ -393,7 +393,7 @@ def modifier_ollama(config):
 def modifier_openrouter(config):
     afficher_titre("OPENROUTER")
 
-    print("1. Clé API")
+    print("1. Gestion du compte local et de la clé API (depuis le menu principal)")
     print("2. Modèle")
     print("3. Base URL")
     print("4. Timeout")
@@ -403,17 +403,19 @@ def modifier_openrouter(config):
 
     choix = input("\nChoisissez un seul champ à modifier : ").strip()
     openrouter = config.setdefault("openrouter", {
-        "api_key": "",
         "model": "openai/gpt-4o-mini",
         "base_url": "https://openrouter.ai/api/v1",
         "timeout": 120,
         "site_url": "",
         "app_name": "Local IA",
     })
+    openrouter.pop("api_key", None)
 
     if choix == "1":
-        print("\nClé API OpenRouter : la valeur est utilisée pour appeler le provider cloud.")
-        openrouter["api_key"] = demander_texte("Clé OpenRouter : ", openrouter.get("api_key", ""))
+        print("\nLa clé API est désormais gérée par un compte local et stockée chiffrée.")
+        print("Connectez-vous depuis le menu principal pour créer ou utiliser un compte.")
+        sauvegarder_config(config)
+        return
 
     elif choix == "2":
         print("\nModèle OpenRouter : exemple openai/gpt-4o-mini, anthropic/claude-3.5-sonnet...")
@@ -600,7 +602,7 @@ def afficher_resume(config):
     print(f"Style        : {config['assistant']['style']}")
     print(f"Modèle       : {config['ollama']['model'] or '(non défini)'}")
     print(f"URL Ollama   : {config['ollama']['url']}")
-    print(f"OpenRouter   : {'configuré' if config.get('openrouter', {}).get('api_key') else 'non configuré'}")
+    print(f"Comptes API  : {len(accounts.list_accounts())} compte(s) local(aux)")
     print(f"Mémoire      : {'activée' if config['memoire']['active'] else 'désactivée'}")
     print(f"Recherche    : {'activée' if config['recherche']['active'] else 'désactivée'}")
     print(f"Instructions : {len(config['instructions'])}")
