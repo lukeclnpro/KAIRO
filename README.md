@@ -3,7 +3,7 @@
 > IA locale, esprit libre. Un assistant personnel extensible avec Ollama optionnel et accès OpenRouter.
 
 <!-- VERSION:START -->
-**Version actuelle : `0.2.0.10(beta10)`**
+**Version actuelle : `0.2.0`**
 <!-- VERSION:END -->
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
@@ -147,12 +147,32 @@ Le contenu ci-dessous est **généré automatiquement** à partir de ces deux fi
 
 <!-- UPDATES:START -->
 <details>
-<summary>Version `0.2.0.10(beta10)` — 2026-10-01 · **Connexion mémorisée et lancement direct du GUI (beta10)**</summary>
+<summary>Version `0.2.0.11(beta11)` — 2026-10-02 · **Gestion des clés API et performances (beta11)**</summary>
+
+- Ajout d'un menu dédié aux clés OpenRouter : aperçu masqué, consultation de l'usage par clé, ajout, suppression et activation ou désactivation.
+- L'état actif des clés est conservé dans le compte chiffré; seules les clés activées sont utilisées et le compte conserve toujours au moins une clé active.
+- L'exécution de commandes suit désormais une politique restrictive : les commandes inconnues ou capables d'exécuter du code nécessitent une confirmation.
+- Les embeddings des souvenirs sont stockés dans SQLite, avec migration des bases existantes et calcul limité aux requêtes ou aux souvenirs encore non indexés.
+- Les sauvegardes de conversations utilisent deepcopy et un JSON compact pour réduire le coût de sérialisation et la taille des fichiers.
+- Centralisation des requêtes HTTP avec validation des URL HTTP(S) et retries réservés aux requêtes GET et HEAD.
+- La suite atteint 286 tests; Ruff et pytest passent dans le workflow CI.
+
+</details>
+
+<details>
+<summary>Version `0.2.0.10(beta10)` — 2026-10-01 · **Connexion mémorisée, sécurité et architecture (beta10)**</summary>
 
 - Les sessions de compte sont conservées dans le trousseau sécurisé du système et restaurées au démarrage du GUI et du CLI.
 - Le clic sur l’icône rapide ouvre désormais le GUI; l’action dédiée au terminal reste disponible.
 - Correction du doublon du bouton Paramètres dans le GUI.
 - L’auto-updater inclut désormais LICENSE et THIRD_PARTY_NOTICES.md et vérifie leur présence avant l’installation.
+- Le serveur web écoute sur localhost par défaut; l’accès réseau exige un jeton et les commandes restent réservées aux clients locaux.
+- Les commandes inconnues nécessitent désormais une confirmation; seules les commandes de lecture explicitement autorisées s’exécutent directement.
+- Le dispatch POST du serveur est organisé par routes et les flux de création, fermeture et chat sont couverts par des tests HTTP.
+- Le catalogue, le scan et les menus de modèles, l’aide du CLI et les fonctions de mise à jour sont séparés dans le package local_ia.
+- Les embeddings des souvenirs sont stockés dans SQLite et les bases existantes sont migrées automatiquement; les sauvegardes de conversations utilisent des instantanés profonds et du JSON compact.
+- Les appels HTTP partagent un client qui valide les URL HTTP(S) et limite les retries aux requêtes GET et HEAD.
+- Ajout de pytest, Ruff et d'un workflow GitHub Actions; la suite compte 280 tests.
 
 </details>
 
