@@ -3,7 +3,7 @@
 > IA locale, esprit libre. Un assistant personnel extensible avec Ollama optionnel et accès OpenRouter.
 
 <!-- VERSION:START -->
-**Version actuelle : `0.2.0`**
+**Version actuelle : `0.2.0.10(beta10)`**
 <!-- VERSION:END -->
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
