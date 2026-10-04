@@ -3,7 +3,7 @@
 > IA locale, esprit libre. Un assistant personnel extensible avec Ollama optionnel et accès OpenRouter.
 
 <!-- VERSION:START -->
-**Version actuelle : `0.2.0.10(beta10)`**
+**Version actuelle : `0.2.0.13(beta13)`**
 <!-- VERSION:END -->
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
@@ -139,19 +139,78 @@ Le contenu ci-dessous est **généré automatiquement** à partir de ces deux fi
 ### 📌 Version actuelle
 
 <!-- VERSION:START -->
-**Version actuelle : `0.2.0.10(beta10)`**
+**Version actuelle : `0.2.0.13(beta13)`**
 <!-- VERSION:END -->
 
 ### 📝 Journal des mises à jour
 
 <!-- UPDATES:START -->
 <details>
-<summary>Version `0.2.0.10(beta10)` — 2026-10-01 · **Connexion mémorisée et lancement direct du GUI (beta10)**</summary>
+<summary>Version `0.2.0.14(beta14)` — 2026-10-04 · **Espace de travail graphique et gestion des comptes (beta14)**</summary>
+
+- Refonte de l'interface graphique autour d'un espace de travail réunissant conversations, projets de code et terminal.
+- Ajout de la gestion des conversations : recherche, filtres, classement, renommage, édition des messages, copie, import, export et suppression.
+- Ajout de la gestion des projets et de l'explorateur de fichiers : création, classement, import, export, renommage et suppression.
+- Ajout de l'édition de fichiers dans la GUI avec sauvegardes, aperçu HTML en direct et validation des modifications proposées par l'IA avant écriture.
+- Ajout d'un gestionnaire de clés OpenRouter permettant de créer, ajouter, consulter l'usage, activer, désactiver et supprimer des clés.
+- Intégration des formulaires de connexion et de création de compte, avec restauration des sessions enregistrées.
+- Ajout de réglages persistants pour le thème et le son des notifications, ainsi que de la sélection de modèles prédéfinis.
+- Renforcement des contrôles des outils et de l'exécution Python, avec permissions par projet et exécution réservée aux fichiers Python du projet.
+
+</details>
+
+<details>
+<summary>Version `0.2.0.13(beta13)` — 2026-10-04 · **Espace de code et outils documentaires (beta13)**</summary>
+
+- Ajout d'un mode Code organisé par projets, avec création, reprise, classement, import, export et gestion des tâches.
+- Ajout d'outils de développement par projet : Git avec confirmations, sauvegarde et restauration de fichiers, analyse et formatage Python avec Ruff.
+- Ajout d'un outil documentaire pour lire, créer et convertir des fichiers PDF et Office, analyser et transformer des tableaux, créer des graphiques SVG et traiter des archives ZIP.
+- Ajout de requêtes SQLite en lecture seule, de l'OCR PDF optionnel et de protections contre les chemins dangereux, l'écrasement et les archives malveillantes.
+- Ajout de la création de fichiers téléchargeables depuis l'interface graphique, sans écraser les fichiers existants.
+- Amélioration du routage des demandes documentaires et de code, de la rotation des clés OpenRouter et du repli vers le modèle par défaut lorsqu'un modèle choisi est indisponible.
+- Ajout d'un raccourci KAIRO dans le menu Démarrer de Windows, sans remplacer un raccourci déjà personnalisé.
+
+</details>
+
+<details>
+<summary>Version `0.2.0.12(beta12)` — 2026-10-02 · **Réponses plus utiles et installation d'applications (beta12)**</summary>
+
+- Retrait complet de l'interface web; l'outil de recherche Web de l'assistant reste disponible.
+- Ajout de l'installation d'applications depuis program_catalog.json dans le terminal, la GUI et le chat, avec confirmation avant exécution.
+- Amélioration du routage des demandes d'information, de code, de commandes à copier, d'installation et de lancement d'applications.
+- Ajout d'une évaluation reproductible hors ligne de cinq parcours de réponse, sans appel à un modèle ni accès réseau.
+- Affichage de la progression des actions dans le terminal et la GUI, avec arrêt explicite en cas de répétition ou de limite d'étapes.
+- La suite complète compte désormais 302 tests.
+
+</details>
+
+<details>
+<summary>Version `0.2.0.11(beta11)` — 2026-10-02 · **Gestion des clés API et performances (beta11)**</summary>
+
+- Ajout d'un menu dédié aux clés OpenRouter : aperçu masqué, consultation de l'usage par clé, ajout, suppression et activation ou désactivation.
+- L'état actif des clés est conservé dans le compte chiffré; seules les clés activées sont utilisées et le compte conserve toujours au moins une clé active.
+- L'exécution de commandes suit désormais une politique restrictive : les commandes inconnues ou capables d'exécuter du code nécessitent une confirmation.
+- Les embeddings des souvenirs sont stockés dans SQLite, avec migration des bases existantes et calcul limité aux requêtes ou aux souvenirs encore non indexés.
+- Les sauvegardes de conversations utilisent deepcopy et un JSON compact pour réduire le coût de sérialisation et la taille des fichiers.
+- Centralisation des requêtes HTTP avec validation des URL HTTP(S) et retries réservés aux requêtes GET et HEAD.
+- La suite atteint 286 tests; Ruff et pytest passent dans le workflow CI.
+
+</details>
+
+<details>
+<summary>Version `0.2.0.10(beta10)` — 2026-10-01 · **Connexion mémorisée, sécurité et architecture (beta10)**</summary>
 
 - Les sessions de compte sont conservées dans le trousseau sécurisé du système et restaurées au démarrage du GUI et du CLI.
 - Le clic sur l’icône rapide ouvre désormais le GUI; l’action dédiée au terminal reste disponible.
 - Correction du doublon du bouton Paramètres dans le GUI.
 - L’auto-updater inclut désormais LICENSE et THIRD_PARTY_NOTICES.md et vérifie leur présence avant l’installation.
+- Le serveur web écoute sur localhost par défaut; l’accès réseau exige un jeton et les commandes restent réservées aux clients locaux.
+- Les commandes inconnues nécessitent désormais une confirmation; seules les commandes de lecture explicitement autorisées s’exécutent directement.
+- Le dispatch POST du serveur est organisé par routes et les flux de création, fermeture et chat sont couverts par des tests HTTP.
+- Le catalogue, le scan et les menus de modèles, l’aide du CLI et les fonctions de mise à jour sont séparés dans le package local_ia.
+- Les embeddings des souvenirs sont stockés dans SQLite et les bases existantes sont migrées automatiquement; les sauvegardes de conversations utilisent des instantanés profonds et du JSON compact.
+- Les appels HTTP partagent un client qui valide les URL HTTP(S) et limite les retries aux requêtes GET et HEAD.
+- Ajout de pytest, Ruff et d'un workflow GitHub Actions; la suite compte 280 tests.
 
 </details>
 
@@ -204,7 +263,7 @@ Le contenu ci-dessous est **généré automatiquement** à partir de ces deux fi
 - Mémorisation persistante des chemins et alias d'applications fournis dans la conversation, avec tolérance aux fautes de frappe courantes.
 - Compréhension des corrections contextuelles comme « WhatsApp s'appelle ZapZap » après un lancement infructueux.
 - Protection contre l'interprétation d'appels d'outils recopiés comme des chemins d'application.
-- Génération et mise à jour automatiques du titre de conversation selon son sujet, affiché dans le CLI.
+- Génération et mise à jour automatiques du titre de conversation selon son sujet, affiché dans l'interface web et le CLI.
 - Conservation des sujets de conversation définis manuellement.
 
 </details>
