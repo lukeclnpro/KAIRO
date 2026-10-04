@@ -7,17 +7,18 @@ from pathlib import Path
 
 import json
 import os
-import time
 import getpass
 from local_ia.http_client import Request, open_url as urlopen
 from urllib.error import URLError, HTTPError
 
 import ui
+import program_commands
 from local_ia.core import accounts
 from local_ia import models as model_manager
 from local_ia import menu as menu_manager
 from local_ia import updater as update_manager
 from local_ia.models import get_model_description
+from local_ia.start_menu import create_start_menu_shortcut
 
 
 # ============================================================
@@ -1249,250 +1250,54 @@ def edit_ai_config():
 
 
 
-def ollama_server_url():
-    """Retourne l'URL de l'API Ollama configurée."""
-    config = load_config()
-    value = config.get("ollama", {}) if isinstance(config, dict) else {}
-    if isinstance(value, dict):
-        url = value.get("url") or "http://127.0.0.1:11434"
-    else:
-        url = "http://127.0.0.1:11434"
-
-    url = str(url).rstrip("/")
-    if url.endswith("/api"):
-        url = url[:-4]
-    return url
-
-
-def ollama_is_running():
-    """Vérifie que le serveur Ollama répond à /api/tags."""
+def install_catalog_application(input_fn=None):
+    input_fn = input_fn or ui.prompt
     try:
-        request = Request(
-            ollama_server_url() + "/api/tags",
-            method="GET",
-        )
-        with urlopen(request, timeout=2) as response:
-            return response.status == 200
-    except (URLError, HTTPError, OSError, TimeoutError):
-        return False
-
-
-def wait_for_ollama(timeout=30):
-    """Attend qu'Ollama soit disponible."""
-    deadline = time.monotonic() + timeout
-
-    while time.monotonic() < deadline:
-        if ollama_is_running():
-            return True
-        time.sleep(0.5)
-
-    return False
-
-
-def start_ollama_for_server():
-    """
-    Prépare Ollama avant de lancer server.py.
-
-    - Vérifie que l'exécutable Ollama existe.
-    - Ne relance pas Ollama s'il est déjà actif.
-    - Sinon démarre `ollama serve` en arrière-plan.
-    - Attend que l'API soit réellement disponible.
-    - Vérifie le modèle configuré et le télécharge s'il manque.
-    """
-    ollama = get_ollama()
-
-    if ollama is None:
-        ui.print_error("Ollama est introuvable dans le PATH.")
-        return False
-
-    print()
-    ui.section_title("PRÉPARATION DE L'IA", clear=False)
-
-    if ollama_is_running():
-        ui.print_ok("Serveur Ollama déjà actif.")
-    else:
-        ui.print_info("Démarrage du serveur Ollama...")
-
-        try:
-            kwargs = {
-                "cwd": str(BASE_DIR),
-                "stdin": subprocess.DEVNULL,
-                "stdout": subprocess.DEVNULL,
-                "stderr": subprocess.DEVNULL,
-            }
-
-            if os.name == "nt" or sys.platform.startswith("win"):
-                kwargs["creationflags"] = getattr(
-                    subprocess, "CREATE_NO_WINDOW", 0
-                )
-            else:
-                kwargs["start_new_session"] = True
-
-            subprocess.Popen(
-                [ollama, "serve"],
-                **kwargs,
-            )
-        except OSError as error:
-            ui.print_error(f"Impossible de démarrer Ollama : {error}")
-            return False
-
-        if not wait_for_ollama(30):
-            ui.print_error(
-                "Ollama a été lancé mais son API ne répond pas "
-                "après 30 secondes."
-            )
-            return False
-
-        ui.print_ok("Serveur Ollama prêt.")
-
-    # Le projet accepte à la fois l'ancien format {"model": "..."}
-    # et le nouveau format {"ollama": {"model": "..."}}.
-    config = load_config()
-    model = ""
-
-    nested = config.get("ollama", {})
-    if isinstance(nested, dict):
-        model = str(nested.get("model") or "").strip()
-
-    if not model:
-        model = str(config.get("model") or "").strip()
-
-    if not model:
-        ui.print_error(
-            "Aucun modèle n'est configuré dans config.json."
-        )
-        ui.print_info(
-            "Lancez d'abord l'IA locale (option 1) pour sélectionner un modèle."
-        )
-        return False
-
-    # Vérifie que le modèle est installé.
-    try:
-        request = Request(
-            ollama_server_url() + "/api/tags",
-            method="GET",
-        )
-        with urlopen(request, timeout=5) as response:
-            data = json.loads(response.read().decode("utf-8"))
-
-        installed = {
-            str(item.get("name", "")).strip()
-            for item in data.get("models", [])
-            if item.get("name")
-        }
-    except Exception as error:
-        ui.print_error(f"Impossible de vérifier les modèles Ollama : {error}")
-        return False
-
-    if model not in installed:
-        ui.print_warn(
-            f"Le modèle '{model}' n'est pas installé. Téléchargement..."
-        )
-
-        try:
-            result = subprocess.run(
-                [ollama, "pull", model],
-                cwd=str(BASE_DIR),
-                check=False,
-            )
-        except OSError as error:
-            ui.print_error(f"Impossible de lancer `ollama pull` : {error}")
-            return False
-
-        if result.returncode != 0:
-            ui.print_error(
-                f"Le téléchargement du modèle '{model}' a échoué."
-            )
-            return False
-
-        ui.print_ok(f"Modèle '{model}' prêt.")
-    else:
-        ui.print_ok(f"Modèle '{model}' déjà installé.")
-
-    return True
-
-
-def launch_server():
-    """
-    Prépare toute la pile IA puis lance server.py dans la même console.
-
-    Ollama est démarré (si nécessaire) et le modèle configuré est vérifié/
-    téléchargé avant de démarrer le serveur web. Le serveur prend ensuite
-    la main dans cette même fenêtre jusqu'à son arrêt avec Ctrl+C.
-    """
-    ui.clear_screen()
-    server_file = BASE_DIR / "server.py"
-
-    if not server_file.exists():
-        ui.print_error("server.py est introuvable.")
+        programs = program_commands.get_catalog_programs()
+    except ValueError as error:
+        ui.print_error(str(error))
         pause()
         return
 
-    ui.section_title("SERVEUR WEB", clear=False)
-    print(
-        ui.colorize(
-            "Le serveur sera lancé dans cette même console après la préparation d'Ollama.",
-            ui.C.INFO,
-        )
-    )
-    print()
-
-    while True:
-        raw_port = ui.prompt("Port HTTP (8080 par défaut) : ").strip()
-
-        if not raw_port:
-            port = 8080
-            break
-
-        if not raw_port.isdigit():
-            ui.print_error("Le port doit être un nombre.")
-            continue
-
-        port = int(raw_port)
-
-        if not 1 <= port <= 65535:
-            ui.print_error("Le port doit être compris entre 1 et 65535.")
-            continue
-
-        break
-
-    # IMPORTANT : Ollama et le modèle sont préparés AVANT de lancer le serveur.
-    if not start_ollama_for_server():
+    ui.section_title("INSTALLER UNE APPLICATION", clear=False)
+    for index, program in enumerate(programs, 1):
+        print(f"{index:>2}. {program['name']} · {program.get('category', 'Autre')}")
+    print(" 0. Retour")
+    choice = input_fn("Application à installer : ").strip()
+    if choice == "0":
+        return
+    if not choice.isdecimal() or not 1 <= int(choice) <= len(programs):
+        ui.print_error("Choix invalide.")
         pause()
         return
 
-    print()
-    ui.print_ok("Ollama et le modèle sont prêts.")
-    ui.print_info(f"Démarrage du serveur sur le port {port}...")
-    print()
+    program = programs[int(choice) - 1]
+    try:
+        plan = program_commands.get_installation_plan(program["id"])
+    except (KeyError, ValueError) as error:
+        ui.print_error(str(error))
+        pause()
+        return
 
-    env = os.environ.copy()
-    env["LOCAL_IA_MAIN_PID"] = str(os.getpid())
-    env["LOCAL_IA_SERVER_PORT"] = str(port)
+    print(f"\nApplication : {program['name']}")
+    print(f"Gestionnaire : {plan['manager']}")
+    print(f"Commande : {program_commands.format_command(plan['command'])}")
+    if plan["requires"]:
+        print("Prérequis : " + ", ".join(plan["requires"]))
+    confirmation = input_fn("Lancer cette installation ? [o/N] ").strip().casefold()
+    if confirmation not in {"o", "oui", "y", "yes"}:
+        ui.print_info("Installation annulée.")
+        return
 
     try:
-        # Aucun nouveau terminal / aucune nouvelle console :
-        # server.py s'exécute directement dans la console actuelle.
-        result = subprocess.run(
-            [sys.executable, str(server_file), str(port)],
-            cwd=str(BASE_DIR),
-            env=env,
-            check=False,
-        )
-
-        if result.returncode != 0:
-            ui.print_error(
-                f"Le serveur s'est arrêté avec le code {result.returncode}."
-            )
-        else:
-            ui.print_info("Serveur arrêté.")
-
-    except KeyboardInterrupt:
-        print("\n")
-        ui.print_info("Arrêt du serveur demandé.")
+        result = program_commands.execute_install_command(plan["command"])
     except OSError as error:
-        ui.print_error(f"Impossible de lancer le serveur : {error}")
-
+        ui.print_error(f"Impossible de lancer l'installation : {error}")
+    else:
+        if result.returncode == 0:
+            ui.print_ok(f"{program['name']} installé.")
+        else:
+            ui.print_error(f"L'installation s'est terminée avec le code {result.returncode}.")
     pause()
 
 
@@ -1580,7 +1385,7 @@ def menu():
 
         elif choice == "6":
 
-            launch_server()
+            install_catalog_application()
 
         elif choice == "7":
 
@@ -1638,11 +1443,13 @@ def main():
         command = sys.argv[1].strip().lower()
 
         if command in {"gui", "--gui"}:
+            create_start_menu_shortcut(BASE_DIR)
             from local_ia.gui import run_gui
 
             return run_gui()
 
         if command == "--tray":
+            create_start_menu_shortcut(BASE_DIR)
             from local_ia.desktop_tray import run_tray
 
             return run_tray()
@@ -1658,6 +1465,8 @@ def main():
             from local_ia.cli.iahelp import main as iahelp_main
 
             return iahelp_main(sys.argv[2:])
+
+    create_start_menu_shortcut(BASE_DIR)
 
     if (
         not os.environ.get("LOCAL_IA_GUI_CHILD")

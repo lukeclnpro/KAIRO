@@ -201,6 +201,48 @@
                 "Centralisation des requêtes HTTP avec validation des URL HTTP(S) et retries réservés aux requêtes GET et HEAD.",
                 "La suite atteint 286 tests; Ruff et pytest passent dans le workflow CI."
             ]
+        },
+        {
+            "version": "0.2.0.12(beta12)",
+            "date": "2026-10-02",
+            "title": "Réponses plus utiles et installation d'applications (beta12)",
+            "changes": [
+                "Retrait complet de l'interface web; l'outil de recherche Web de l'assistant reste disponible.",
+                "Ajout de l'installation d'applications depuis program_catalog.json dans le terminal, la GUI et le chat, avec confirmation avant exécution.",
+                "Amélioration du routage des demandes d'information, de code, de commandes à copier, d'installation et de lancement d'applications.",
+                "Ajout d'une évaluation reproductible hors ligne de cinq parcours de réponse, sans appel à un modèle ni accès réseau.",
+                "Affichage de la progression des actions dans le terminal et la GUI, avec arrêt explicite en cas de répétition ou de limite d'étapes.",
+                "La suite complète compte désormais 302 tests."
+            ]
+        },
+        {
+            "version": "0.2.0.13(beta13)",
+            "date": "2026-10-04",
+            "title": "Espace de code et outils documentaires (beta13)",
+            "changes": [
+                "Ajout d'un mode Code organisé par projets, avec création, reprise, classement, import, export et gestion des tâches.",
+                "Ajout d'outils de développement par projet : Git avec confirmations, sauvegarde et restauration de fichiers, analyse et formatage Python avec Ruff.",
+                "Ajout d'un outil documentaire pour lire, créer et convertir des fichiers PDF et Office, analyser et transformer des tableaux, créer des graphiques SVG et traiter des archives ZIP.",
+                "Ajout de requêtes SQLite en lecture seule, de l'OCR PDF optionnel et de protections contre les chemins dangereux, l'écrasement et les archives malveillantes.",
+                "Ajout de la création de fichiers téléchargeables depuis l'interface graphique, sans écraser les fichiers existants.",
+                "Amélioration du routage des demandes documentaires et de code, de la rotation des clés OpenRouter et du repli vers le modèle par défaut lorsqu'un modèle choisi est indisponible.",
+                "Ajout d'un raccourci KAIRO dans le menu Démarrer de Windows, sans remplacer un raccourci déjà personnalisé."
+            ]
+        },
+        {
+            "version": "0.2.0.14(beta14)",
+            "date": "2026-10-04",
+            "title": "Espace de travail graphique et gestion des comptes (beta14)",
+            "changes": [
+                "Refonte de l'interface graphique autour d'un espace de travail réunissant conversations, projets de code et terminal.",
+                "Ajout de la gestion des conversations : recherche, filtres, classement, renommage, édition des messages, copie, import, export et suppression.",
+                "Ajout de la gestion des projets et de l'explorateur de fichiers : création, classement, import, export, renommage et suppression.",
+                "Ajout de l'édition de fichiers dans la GUI avec sauvegardes, aperçu HTML en direct et validation des modifications proposées par l'IA avant écriture.",
+                "Ajout d'un gestionnaire de clés OpenRouter permettant de créer, ajouter, consulter l'usage, activer, désactiver et supprimer des clés.",
+                "Intégration des formulaires de connexion et de création de compte, avec restauration des sessions enregistrées.",
+                "Ajout de réglages persistants pour le thème et le son des notifications, ainsi que de la sélection de modèles prédéfinis.",
+                "Renforcement des contrôles des outils et de l'exécution Python, avec permissions par projet et exécution réservée aux fichiers Python du projet."
+            ]
         }
     ]
 }

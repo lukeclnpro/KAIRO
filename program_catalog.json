@@ -1,0 +1,751 @@
+{
+  "schema_version": 1,
+  "description": "Catalogue indicatif de logiciels connus. Les commandes d'installation doivent être affichées à l'utilisateur et confirmées avant exécution.",
+  "compatibility_targets": {
+    "macos": {
+      "versions": ["14 Sonoma", "15 Sequoia", "26 Tahoe"],
+      "package_manager": "Homebrew"
+    },
+    "linux": {
+      "distributions": [
+        {"name": "Ubuntu", "versions": ["22.04 LTS", "24.04 LTS", "26.04 LTS"]},
+        {"name": "Debian", "versions": ["12 Bookworm", "13 Trixie"]},
+        {"name": "Fedora", "versions": ["42", "43", "44"]},
+        {"name": "Linux Mint", "versions": ["21.x", "22.x"]},
+        {"name": "Arch Linux", "versions": ["rolling"]}
+      ],
+      "package_managers": ["Flatpak", "APT", "DNF", "Pacman", "Zypper"]
+    }
+  },
+  "programs": [
+    {
+      "id": "firefox",
+      "name": "Mozilla Firefox",
+      "category": "Navigateur",
+      "download_page": "https://www.mozilla.org/firefox/new/",
+      "install": {
+        "windows": {
+          "manager": "winget",
+          "command": ["winget", "install", "--exact", "--id", "Mozilla.Firefox", "--accept-source-agreements", "--accept-package-agreements"]
+        },
+        "macos": {
+          "manager": "homebrew",
+          "command": ["brew", "install", "--cask", "firefox"]
+        },
+        "linux": {
+          "flatpak": {
+            "requires": ["flatpak", "remote Flathub configuré"],
+            "command": ["flatpak", "install", "--user", "--assumeyes", "flathub", "org.mozilla.firefox"]
+          }
+        }
+      },
+      "raw_commands_by_version": {
+        "macos": {
+          "14 Sonoma": "brew install --cask firefox",
+          "15 Sequoia": "brew install --cask firefox",
+          "26 Tahoe": "brew install --cask firefox"
+        },
+        "linux": {
+          "Ubuntu 22.04 LTS": "flatpak install --user --assumeyes flathub org.mozilla.firefox",
+          "Ubuntu 24.04 LTS": "flatpak install --user --assumeyes flathub org.mozilla.firefox",
+          "Ubuntu 26.04 LTS": "flatpak install --user --assumeyes flathub org.mozilla.firefox",
+          "Debian 12 Bookworm": "flatpak install --user --assumeyes flathub org.mozilla.firefox",
+          "Debian 13 Trixie": "flatpak install --user --assumeyes flathub org.mozilla.firefox",
+          "Fedora 42": "flatpak install --user --assumeyes flathub org.mozilla.firefox",
+          "Fedora 43": "flatpak install --user --assumeyes flathub org.mozilla.firefox",
+          "Fedora 44": "flatpak install --user --assumeyes flathub org.mozilla.firefox",
+          "Linux Mint 21.x": "flatpak install --user --assumeyes flathub org.mozilla.firefox",
+          "Linux Mint 22.x": "flatpak install --user --assumeyes flathub org.mozilla.firefox",
+          "Arch Linux rolling": "flatpak install --user --assumeyes flathub org.mozilla.firefox"
+        }
+      }
+    },
+    {
+      "id": "google-chrome",
+      "name": "Google Chrome",
+      "category": "Navigateur",
+      "download_page": "https://www.google.com/chrome/",
+      "install": {
+        "windows": {
+          "manager": "winget",
+          "command": ["winget", "install", "--exact", "--id", "Google.Chrome", "--accept-source-agreements", "--accept-package-agreements"]
+        },
+        "macos": {
+          "manager": "homebrew",
+          "command": ["brew", "install", "--cask", "google-chrome"]
+        },
+        "linux": {
+          "flatpak": {
+            "requires": ["flatpak", "remote Flathub configuré"],
+            "command": ["flatpak", "install", "--user", "--assumeyes", "flathub", "com.google.Chrome"]
+          }
+        }
+      },
+      "raw_commands_by_version": {
+        "macos": {
+          "14 Sonoma": "brew install --cask google-chrome",
+          "15 Sequoia": "brew install --cask google-chrome",
+          "26 Tahoe": "brew install --cask google-chrome"
+        },
+        "linux": {
+          "Ubuntu 22.04 LTS": "flatpak install --user --assumeyes flathub com.google.Chrome",
+          "Ubuntu 24.04 LTS": "flatpak install --user --assumeyes flathub com.google.Chrome",
+          "Ubuntu 26.04 LTS": "flatpak install --user --assumeyes flathub com.google.Chrome",
+          "Debian 12 Bookworm": "flatpak install --user --assumeyes flathub com.google.Chrome",
+          "Debian 13 Trixie": "flatpak install --user --assumeyes flathub com.google.Chrome",
+          "Fedora 42": "flatpak install --user --assumeyes flathub com.google.Chrome",
+          "Fedora 43": "flatpak install --user --assumeyes flathub com.google.Chrome",
+          "Fedora 44": "flatpak install --user --assumeyes flathub com.google.Chrome",
+          "Linux Mint 21.x": "flatpak install --user --assumeyes flathub com.google.Chrome",
+          "Linux Mint 22.x": "flatpak install --user --assumeyes flathub com.google.Chrome",
+          "Arch Linux rolling": "flatpak install --user --assumeyes flathub com.google.Chrome"
+        }
+      }
+    },
+    {
+      "id": "visual-studio-code",
+      "name": "Visual Studio Code",
+      "category": "Développement",
+      "download_page": "https://code.visualstudio.com/download",
+      "install": {
+        "windows": {
+          "manager": "winget",
+          "command": ["winget", "install", "--exact", "--id", "Microsoft.VisualStudioCode", "--accept-source-agreements", "--accept-package-agreements"]
+        },
+        "macos": {
+          "manager": "homebrew",
+          "command": ["brew", "install", "--cask", "visual-studio-code"]
+        },
+        "linux": {
+          "flatpak": {
+            "requires": ["flatpak", "remote Flathub configuré"],
+            "command": ["flatpak", "install", "--user", "--assumeyes", "flathub", "com.visualstudio.code"]
+          }
+        }
+      },
+      "raw_commands_by_version": {
+        "macos": {
+          "14 Sonoma": "brew install --cask visual-studio-code",
+          "15 Sequoia": "brew install --cask visual-studio-code",
+          "26 Tahoe": "brew install --cask visual-studio-code"
+        },
+        "linux": {
+          "Ubuntu 22.04 LTS": "flatpak install --user --assumeyes flathub com.visualstudio.code",
+          "Ubuntu 24.04 LTS": "flatpak install --user --assumeyes flathub com.visualstudio.code",
+          "Ubuntu 26.04 LTS": "flatpak install --user --assumeyes flathub com.visualstudio.code",
+          "Debian 12 Bookworm": "flatpak install --user --assumeyes flathub com.visualstudio.code",
+          "Debian 13 Trixie": "flatpak install --user --assumeyes flathub com.visualstudio.code",
+          "Fedora 42": "flatpak install --user --assumeyes flathub com.visualstudio.code",
+          "Fedora 43": "flatpak install --user --assumeyes flathub com.visualstudio.code",
+          "Fedora 44": "flatpak install --user --assumeyes flathub com.visualstudio.code",
+          "Linux Mint 21.x": "flatpak install --user --assumeyes flathub com.visualstudio.code",
+          "Linux Mint 22.x": "flatpak install --user --assumeyes flathub com.visualstudio.code",
+          "Arch Linux rolling": "flatpak install --user --assumeyes flathub com.visualstudio.code"
+        }
+      }
+    },
+    {
+      "id": "vlc",
+      "name": "VLC media player",
+      "category": "Multimédia",
+      "download_page": "https://www.videolan.org/vlc/",
+      "install": {
+        "windows": {
+          "manager": "winget",
+          "command": ["winget", "install", "--exact", "--id", "VideoLAN.VLC", "--accept-source-agreements", "--accept-package-agreements"]
+        },
+        "macos": {
+          "manager": "homebrew",
+          "command": ["brew", "install", "--cask", "vlc"]
+        },
+        "linux": {
+          "flatpak": {
+            "requires": ["flatpak", "remote Flathub configuré"],
+            "command": ["flatpak", "install", "--user", "--assumeyes", "flathub", "org.videolan.VLC"]
+          }
+        }
+      },
+      "raw_commands_by_version": {
+        "macos": {
+          "14 Sonoma": "brew install --cask vlc",
+          "15 Sequoia": "brew install --cask vlc",
+          "26 Tahoe": "brew install --cask vlc"
+        },
+        "linux": {
+          "Ubuntu 22.04 LTS": "flatpak install --user --assumeyes flathub org.videolan.VLC",
+          "Ubuntu 24.04 LTS": "flatpak install --user --assumeyes flathub org.videolan.VLC",
+          "Ubuntu 26.04 LTS": "flatpak install --user --assumeyes flathub org.videolan.VLC",
+          "Debian 12 Bookworm": "flatpak install --user --assumeyes flathub org.videolan.VLC",
+          "Debian 13 Trixie": "flatpak install --user --assumeyes flathub org.videolan.VLC",
+          "Fedora 42": "flatpak install --user --assumeyes flathub org.videolan.VLC",
+          "Fedora 43": "flatpak install --user --assumeyes flathub org.videolan.VLC",
+          "Fedora 44": "flatpak install --user --assumeyes flathub org.videolan.VLC",
+          "Linux Mint 21.x": "flatpak install --user --assumeyes flathub org.videolan.VLC",
+          "Linux Mint 22.x": "flatpak install --user --assumeyes flathub org.videolan.VLC",
+          "Arch Linux rolling": "flatpak install --user --assumeyes flathub org.videolan.VLC"
+        }
+      }
+    },
+    {
+      "id": "libreoffice",
+      "name": "LibreOffice",
+      "category": "Bureautique",
+      "download_page": "https://www.libreoffice.org/download/download-libreoffice/",
+      "install": {
+        "windows": {
+          "manager": "winget",
+          "command": ["winget", "install", "--exact", "--id", "TheDocumentFoundation.LibreOffice", "--accept-source-agreements", "--accept-package-agreements"]
+        },
+        "macos": {
+          "manager": "homebrew",
+          "command": ["brew", "install", "--cask", "libreoffice"]
+        },
+        "linux": {
+          "flatpak": {
+            "requires": ["flatpak", "remote Flathub configuré"],
+            "command": ["flatpak", "install", "--user", "--assumeyes", "flathub", "org.libreoffice.LibreOffice"]
+          }
+        }
+      },
+      "raw_commands_by_version": {
+        "macos": {
+          "14 Sonoma": "brew install --cask libreoffice",
+          "15 Sequoia": "brew install --cask libreoffice",
+          "26 Tahoe": "brew install --cask libreoffice"
+        },
+        "linux": {
+          "Ubuntu 22.04 LTS": "flatpak install --user --assumeyes flathub org.libreoffice.LibreOffice",
+          "Ubuntu 24.04 LTS": "flatpak install --user --assumeyes flathub org.libreoffice.LibreOffice",
+          "Ubuntu 26.04 LTS": "flatpak install --user --assumeyes flathub org.libreoffice.LibreOffice",
+          "Debian 12 Bookworm": "flatpak install --user --assumeyes flathub org.libreoffice.LibreOffice",
+          "Debian 13 Trixie": "flatpak install --user --assumeyes flathub org.libreoffice.LibreOffice",
+          "Fedora 42": "flatpak install --user --assumeyes flathub org.libreoffice.LibreOffice",
+          "Fedora 43": "flatpak install --user --assumeyes flathub org.libreoffice.LibreOffice",
+          "Fedora 44": "flatpak install --user --assumeyes flathub org.libreoffice.LibreOffice",
+          "Linux Mint 21.x": "flatpak install --user --assumeyes flathub org.libreoffice.LibreOffice",
+          "Linux Mint 22.x": "flatpak install --user --assumeyes flathub org.libreoffice.LibreOffice",
+          "Arch Linux rolling": "flatpak install --user --assumeyes flathub org.libreoffice.LibreOffice"
+        }
+      }
+    },
+    {
+      "id": "git",
+      "name": "Git",
+      "category": "Développement",
+      "download_page": "https://git-scm.com/downloads",
+      "install": {
+        "windows": {
+          "manager": "winget",
+          "command": ["winget", "install", "--exact", "--id", "Git.Git", "--accept-source-agreements", "--accept-package-agreements"]
+        },
+        "macos": {
+          "manager": "homebrew",
+          "command": ["brew", "install", "git"]
+        },
+        "linux": {
+          "apt": {"command": ["sudo", "apt", "install", "git"]},
+          "dnf": {"command": ["sudo", "dnf", "install", "git"]},
+          "pacman": {"command": ["sudo", "pacman", "-S", "git"]},
+          "zypper": {"command": ["sudo", "zypper", "install", "git"]}
+        }
+      },
+      "raw_commands_by_version": {
+        "macos": {
+          "14 Sonoma": "brew install git",
+          "15 Sequoia": "brew install git",
+          "26 Tahoe": "brew install git"
+        },
+        "linux": {
+          "Ubuntu 22.04 LTS": "sudo apt install git",
+          "Ubuntu 24.04 LTS": "sudo apt install git",
+          "Ubuntu 26.04 LTS": "sudo apt install git",
+          "Debian 12 Bookworm": "sudo apt install git",
+          "Debian 13 Trixie": "sudo apt install git",
+          "Fedora 42": "sudo dnf install git",
+          "Fedora 43": "sudo dnf install git",
+          "Fedora 44": "sudo dnf install git",
+          "Linux Mint 21.x": "sudo apt install git",
+          "Linux Mint 22.x": "sudo apt install git",
+          "Arch Linux rolling": "sudo pacman -S git"
+        }
+      }
+    },
+    {
+      "id": "gimp",
+      "name": "GIMP",
+      "category": "Création",
+      "download_page": "https://www.gimp.org/downloads/",
+      "install": {
+        "windows": {
+          "manager": "winget",
+          "command": ["winget", "install", "--exact", "--id", "GIMP.GIMP", "--accept-source-agreements", "--accept-package-agreements"]
+        },
+        "macos": {
+          "manager": "homebrew",
+          "command": ["brew", "install", "--cask", "gimp"]
+        },
+        "linux": {
+          "flatpak": {
+            "requires": ["flatpak", "remote Flathub configuré"],
+            "command": ["flatpak", "install", "--user", "--assumeyes", "flathub", "org.gimp.GIMP"]
+          }
+        }
+      },
+      "raw_commands_by_version": {
+        "macos": {
+          "14 Sonoma": "brew install --cask gimp",
+          "15 Sequoia": "brew install --cask gimp",
+          "26 Tahoe": "brew install --cask gimp"
+        },
+        "linux": {
+          "Ubuntu 22.04 LTS": "flatpak install --user --assumeyes flathub org.gimp.GIMP",
+          "Ubuntu 24.04 LTS": "flatpak install --user --assumeyes flathub org.gimp.GIMP",
+          "Ubuntu 26.04 LTS": "flatpak install --user --assumeyes flathub org.gimp.GIMP",
+          "Debian 12 Bookworm": "flatpak install --user --assumeyes flathub org.gimp.GIMP",
+          "Debian 13 Trixie": "flatpak install --user --assumeyes flathub org.gimp.GIMP",
+          "Fedora 42": "flatpak install --user --assumeyes flathub org.gimp.GIMP",
+          "Fedora 43": "flatpak install --user --assumeyes flathub org.gimp.GIMP",
+          "Fedora 44": "flatpak install --user --assumeyes flathub org.gimp.GIMP",
+          "Linux Mint 21.x": "flatpak install --user --assumeyes flathub org.gimp.GIMP",
+          "Linux Mint 22.x": "flatpak install --user --assumeyes flathub org.gimp.GIMP",
+          "Arch Linux rolling": "flatpak install --user --assumeyes flathub org.gimp.GIMP"
+        }
+      }
+    },
+    {
+      "id": "blender",
+      "name": "Blender",
+      "category": "Création",
+      "download_page": "https://www.blender.org/download/",
+      "install": {
+        "windows": {
+          "manager": "winget",
+          "command": ["winget", "install", "--exact", "--id", "BlenderFoundation.Blender", "--accept-source-agreements", "--accept-package-agreements"]
+        },
+        "macos": {
+          "manager": "homebrew",
+          "command": ["brew", "install", "--cask", "blender"]
+        },
+        "linux": {
+          "flatpak": {
+            "requires": ["flatpak", "remote Flathub configuré"],
+            "command": ["flatpak", "install", "--user", "--assumeyes", "flathub", "org.blender.Blender"]
+          }
+        }
+      },
+      "raw_commands_by_version": {
+        "macos": {
+          "14 Sonoma": "brew install --cask blender",
+          "15 Sequoia": "brew install --cask blender",
+          "26 Tahoe": "brew install --cask blender"
+        },
+        "linux": {
+          "Ubuntu 22.04 LTS": "flatpak install --user --assumeyes flathub org.blender.Blender",
+          "Ubuntu 24.04 LTS": "flatpak install --user --assumeyes flathub org.blender.Blender",
+          "Ubuntu 26.04 LTS": "flatpak install --user --assumeyes flathub org.blender.Blender",
+          "Debian 12 Bookworm": "flatpak install --user --assumeyes flathub org.blender.Blender",
+          "Debian 13 Trixie": "flatpak install --user --assumeyes flathub org.blender.Blender",
+          "Fedora 42": "flatpak install --user --assumeyes flathub org.blender.Blender",
+          "Fedora 43": "flatpak install --user --assumeyes flathub org.blender.Blender",
+          "Fedora 44": "flatpak install --user --assumeyes flathub org.blender.Blender",
+          "Linux Mint 21.x": "flatpak install --user --assumeyes flathub org.blender.Blender",
+          "Linux Mint 22.x": "flatpak install --user --assumeyes flathub org.blender.Blender",
+          "Arch Linux rolling": "flatpak install --user --assumeyes flathub org.blender.Blender"
+        }
+      }
+    },
+    {
+      "id": "thunderbird",
+      "name": "Mozilla Thunderbird",
+      "category": "Communication",
+      "download_page": "https://www.thunderbird.net/download/",
+      "install": {
+        "windows": {
+          "manager": "winget",
+          "command": ["winget", "install", "--exact", "--id", "Mozilla.Thunderbird", "--accept-source-agreements", "--accept-package-agreements"]
+        },
+        "macos": {
+          "manager": "homebrew",
+          "command": ["brew", "install", "--cask", "thunderbird"]
+        },
+        "linux": {
+          "flatpak": {
+            "requires": ["flatpak", "remote Flathub configuré"],
+            "command": ["flatpak", "install", "--user", "--assumeyes", "flathub", "org.mozilla.Thunderbird"]
+          }
+        }
+      },
+      "raw_commands_by_version": {
+        "macos": {
+          "14 Sonoma": "brew install --cask thunderbird",
+          "15 Sequoia": "brew install --cask thunderbird",
+          "26 Tahoe": "brew install --cask thunderbird"
+        },
+        "linux": {
+          "Ubuntu 22.04 LTS": "flatpak install --user --assumeyes flathub org.mozilla.Thunderbird",
+          "Ubuntu 24.04 LTS": "flatpak install --user --assumeyes flathub org.mozilla.Thunderbird",
+          "Ubuntu 26.04 LTS": "flatpak install --user --assumeyes flathub org.mozilla.Thunderbird",
+          "Debian 12 Bookworm": "flatpak install --user --assumeyes flathub org.mozilla.Thunderbird",
+          "Debian 13 Trixie": "flatpak install --user --assumeyes flathub org.mozilla.Thunderbird",
+          "Fedora 42": "flatpak install --user --assumeyes flathub org.mozilla.Thunderbird",
+          "Fedora 43": "flatpak install --user --assumeyes flathub org.mozilla.Thunderbird",
+          "Fedora 44": "flatpak install --user --assumeyes flathub org.mozilla.Thunderbird",
+          "Linux Mint 21.x": "flatpak install --user --assumeyes flathub org.mozilla.Thunderbird",
+          "Linux Mint 22.x": "flatpak install --user --assumeyes flathub org.mozilla.Thunderbird",
+          "Arch Linux rolling": "flatpak install --user --assumeyes flathub org.mozilla.Thunderbird"
+        }
+      }
+    },
+    {
+      "id": "discord",
+      "name": "Discord",
+      "category": "Communication",
+      "download_page": "https://discord.com/download",
+      "install": {
+        "windows": {"manager": "winget", "command": ["winget", "install", "--exact", "--id", "Discord.Discord", "--accept-source-agreements", "--accept-package-agreements"]},
+        "macos": {"manager": "homebrew", "command": ["brew", "install", "--cask", "discord"]},
+        "linux": {"flatpak": {"requires": ["flatpak", "remote Flathub configuré"], "command": ["flatpak", "install", "--user", "--assumeyes", "flathub", "com.discordapp.Discord"]}}
+      },
+      "raw_commands_by_version": {
+        "macos": {"14 Sonoma": "brew install --cask discord", "15 Sequoia": "brew install --cask discord", "26 Tahoe": "brew install --cask discord"},
+        "linux": {
+          "Ubuntu 22.04 LTS": "flatpak install --user --assumeyes flathub com.discordapp.Discord",
+          "Ubuntu 24.04 LTS": "flatpak install --user --assumeyes flathub com.discordapp.Discord",
+          "Ubuntu 26.04 LTS": "flatpak install --user --assumeyes flathub com.discordapp.Discord",
+          "Debian 12 Bookworm": "flatpak install --user --assumeyes flathub com.discordapp.Discord",
+          "Debian 13 Trixie": "flatpak install --user --assumeyes flathub com.discordapp.Discord",
+          "Fedora 42": "flatpak install --user --assumeyes flathub com.discordapp.Discord",
+          "Fedora 43": "flatpak install --user --assumeyes flathub com.discordapp.Discord",
+          "Fedora 44": "flatpak install --user --assumeyes flathub com.discordapp.Discord",
+          "Linux Mint 21.x": "flatpak install --user --assumeyes flathub com.discordapp.Discord",
+          "Linux Mint 22.x": "flatpak install --user --assumeyes flathub com.discordapp.Discord",
+          "Arch Linux rolling": "flatpak install --user --assumeyes flathub com.discordapp.Discord"
+        }
+      }
+    },
+    {
+      "id": "zoom",
+      "name": "Zoom Workplace",
+      "category": "Communication",
+      "download_page": "https://zoom.us/download",
+      "install": {
+        "windows": {"manager": "winget", "command": ["winget", "install", "--exact", "--id", "Zoom.Zoom", "--accept-source-agreements", "--accept-package-agreements"]},
+        "macos": {"manager": "homebrew", "command": ["brew", "install", "--cask", "zoom"]},
+        "linux": {"flatpak": {"requires": ["flatpak", "remote Flathub configuré"], "command": ["flatpak", "install", "--user", "--assumeyes", "flathub", "us.zoom.Zoom"]}}
+      },
+      "raw_commands_by_version": {
+        "macos": {"14 Sonoma": "brew install --cask zoom", "15 Sequoia": "brew install --cask zoom", "26 Tahoe": "brew install --cask zoom"},
+        "linux": {
+          "Ubuntu 22.04 LTS": "flatpak install --user --assumeyes flathub us.zoom.Zoom",
+          "Ubuntu 24.04 LTS": "flatpak install --user --assumeyes flathub us.zoom.Zoom",
+          "Ubuntu 26.04 LTS": "flatpak install --user --assumeyes flathub us.zoom.Zoom",
+          "Debian 12 Bookworm": "flatpak install --user --assumeyes flathub us.zoom.Zoom",
+          "Debian 13 Trixie": "flatpak install --user --assumeyes flathub us.zoom.Zoom",
+          "Fedora 42": "flatpak install --user --assumeyes flathub us.zoom.Zoom",
+          "Fedora 43": "flatpak install --user --assumeyes flathub us.zoom.Zoom",
+          "Fedora 44": "flatpak install --user --assumeyes flathub us.zoom.Zoom",
+          "Linux Mint 21.x": "flatpak install --user --assumeyes flathub us.zoom.Zoom",
+          "Linux Mint 22.x": "flatpak install --user --assumeyes flathub us.zoom.Zoom",
+          "Arch Linux rolling": "flatpak install --user --assumeyes flathub us.zoom.Zoom"
+        }
+      }
+    },
+    {
+      "id": "spotify",
+      "name": "Spotify",
+      "category": "Musique",
+      "download_page": "https://www.spotify.com/download/",
+      "install": {
+        "windows": {"manager": "winget", "command": ["winget", "install", "--exact", "--id", "Spotify.Spotify", "--accept-source-agreements", "--accept-package-agreements"]},
+        "macos": {"manager": "homebrew", "command": ["brew", "install", "--cask", "spotify"]},
+        "linux": {"flatpak": {"requires": ["flatpak", "remote Flathub configuré"], "command": ["flatpak", "install", "--user", "--assumeyes", "flathub", "com.spotify.Client"]}}
+      },
+      "raw_commands_by_version": {
+        "macos": {"14 Sonoma": "brew install --cask spotify", "15 Sequoia": "brew install --cask spotify", "26 Tahoe": "brew install --cask spotify"},
+        "linux": {
+          "Ubuntu 22.04 LTS": "flatpak install --user --assumeyes flathub com.spotify.Client",
+          "Ubuntu 24.04 LTS": "flatpak install --user --assumeyes flathub com.spotify.Client",
+          "Ubuntu 26.04 LTS": "flatpak install --user --assumeyes flathub com.spotify.Client",
+          "Debian 12 Bookworm": "flatpak install --user --assumeyes flathub com.spotify.Client",
+          "Debian 13 Trixie": "flatpak install --user --assumeyes flathub com.spotify.Client",
+          "Fedora 42": "flatpak install --user --assumeyes flathub com.spotify.Client",
+          "Fedora 43": "flatpak install --user --assumeyes flathub com.spotify.Client",
+          "Fedora 44": "flatpak install --user --assumeyes flathub com.spotify.Client",
+          "Linux Mint 21.x": "flatpak install --user --assumeyes flathub com.spotify.Client",
+          "Linux Mint 22.x": "flatpak install --user --assumeyes flathub com.spotify.Client",
+          "Arch Linux rolling": "flatpak install --user --assumeyes flathub com.spotify.Client"
+        }
+      }
+    },
+    {
+      "id": "obs-studio",
+      "name": "OBS Studio",
+      "category": "Vidéo et streaming",
+      "download_page": "https://obsproject.com/download",
+      "install": {
+        "windows": {"manager": "winget", "command": ["winget", "install", "--exact", "--id", "OBSProject.OBSStudio", "--accept-source-agreements", "--accept-package-agreements"]},
+        "macos": {"manager": "homebrew", "command": ["brew", "install", "--cask", "obs"]},
+        "linux": {"flatpak": {"requires": ["flatpak", "remote Flathub configuré"], "command": ["flatpak", "install", "--user", "--assumeyes", "flathub", "com.obsproject.Studio"]}}
+      },
+      "raw_commands_by_version": {
+        "macos": {"14 Sonoma": "brew install --cask obs", "15 Sequoia": "brew install --cask obs", "26 Tahoe": "brew install --cask obs"},
+        "linux": {
+          "Ubuntu 22.04 LTS": "flatpak install --user --assumeyes flathub com.obsproject.Studio",
+          "Ubuntu 24.04 LTS": "flatpak install --user --assumeyes flathub com.obsproject.Studio",
+          "Ubuntu 26.04 LTS": "flatpak install --user --assumeyes flathub com.obsproject.Studio",
+          "Debian 12 Bookworm": "flatpak install --user --assumeyes flathub com.obsproject.Studio",
+          "Debian 13 Trixie": "flatpak install --user --assumeyes flathub com.obsproject.Studio",
+          "Fedora 42": "flatpak install --user --assumeyes flathub com.obsproject.Studio",
+          "Fedora 43": "flatpak install --user --assumeyes flathub com.obsproject.Studio",
+          "Fedora 44": "flatpak install --user --assumeyes flathub com.obsproject.Studio",
+          "Linux Mint 21.x": "flatpak install --user --assumeyes flathub com.obsproject.Studio",
+          "Linux Mint 22.x": "flatpak install --user --assumeyes flathub com.obsproject.Studio",
+          "Arch Linux rolling": "flatpak install --user --assumeyes flathub com.obsproject.Studio"
+        }
+      }
+    },
+    {
+      "id": "audacity",
+      "name": "Audacity",
+      "category": "Audio",
+      "download_page": "https://www.audacityteam.org/download/",
+      "install": {
+        "windows": {"manager": "winget", "command": ["winget", "install", "--exact", "--id", "Audacity.Audacity", "--accept-source-agreements", "--accept-package-agreements"]},
+        "macos": {"manager": "homebrew", "command": ["brew", "install", "--cask", "audacity"]},
+        "linux": {"flatpak": {"requires": ["flatpak", "remote Flathub configuré"], "command": ["flatpak", "install", "--user", "--assumeyes", "flathub", "org.audacityteam.Audacity"]}}
+      },
+      "raw_commands_by_version": {
+        "macos": {"14 Sonoma": "brew install --cask audacity", "15 Sequoia": "brew install --cask audacity", "26 Tahoe": "brew install --cask audacity"},
+        "linux": {
+          "Ubuntu 22.04 LTS": "flatpak install --user --assumeyes flathub org.audacityteam.Audacity",
+          "Ubuntu 24.04 LTS": "flatpak install --user --assumeyes flathub org.audacityteam.Audacity",
+          "Ubuntu 26.04 LTS": "flatpak install --user --assumeyes flathub org.audacityteam.Audacity",
+          "Debian 12 Bookworm": "flatpak install --user --assumeyes flathub org.audacityteam.Audacity",
+          "Debian 13 Trixie": "flatpak install --user --assumeyes flathub org.audacityteam.Audacity",
+          "Fedora 42": "flatpak install --user --assumeyes flathub org.audacityteam.Audacity",
+          "Fedora 43": "flatpak install --user --assumeyes flathub org.audacityteam.Audacity",
+          "Fedora 44": "flatpak install --user --assumeyes flathub org.audacityteam.Audacity",
+          "Linux Mint 21.x": "flatpak install --user --assumeyes flathub org.audacityteam.Audacity",
+          "Linux Mint 22.x": "flatpak install --user --assumeyes flathub org.audacityteam.Audacity",
+          "Arch Linux rolling": "flatpak install --user --assumeyes flathub org.audacityteam.Audacity"
+        }
+      }
+    },
+    {
+      "id": "inkscape",
+      "name": "Inkscape",
+      "category": "Création vectorielle",
+      "download_page": "https://inkscape.org/release/",
+      "install": {
+        "windows": {"manager": "winget", "command": ["winget", "install", "--exact", "--id", "Inkscape.Inkscape", "--accept-source-agreements", "--accept-package-agreements"]},
+        "macos": {"manager": "homebrew", "command": ["brew", "install", "--cask", "inkscape"]},
+        "linux": {"flatpak": {"requires": ["flatpak", "remote Flathub configuré"], "command": ["flatpak", "install", "--user", "--assumeyes", "flathub", "org.inkscape.Inkscape"]}}
+      },
+      "raw_commands_by_version": {
+        "macos": {"14 Sonoma": "brew install --cask inkscape", "15 Sequoia": "brew install --cask inkscape", "26 Tahoe": "brew install --cask inkscape"},
+        "linux": {
+          "Ubuntu 22.04 LTS": "flatpak install --user --assumeyes flathub org.inkscape.Inkscape",
+          "Ubuntu 24.04 LTS": "flatpak install --user --assumeyes flathub org.inkscape.Inkscape",
+          "Ubuntu 26.04 LTS": "flatpak install --user --assumeyes flathub org.inkscape.Inkscape",
+          "Debian 12 Bookworm": "flatpak install --user --assumeyes flathub org.inkscape.Inkscape",
+          "Debian 13 Trixie": "flatpak install --user --assumeyes flathub org.inkscape.Inkscape",
+          "Fedora 42": "flatpak install --user --assumeyes flathub org.inkscape.Inkscape",
+          "Fedora 43": "flatpak install --user --assumeyes flathub org.inkscape.Inkscape",
+          "Fedora 44": "flatpak install --user --assumeyes flathub org.inkscape.Inkscape",
+          "Linux Mint 21.x": "flatpak install --user --assumeyes flathub org.inkscape.Inkscape",
+          "Linux Mint 22.x": "flatpak install --user --assumeyes flathub org.inkscape.Inkscape",
+          "Arch Linux rolling": "flatpak install --user --assumeyes flathub org.inkscape.Inkscape"
+        }
+      }
+    },
+    {
+      "id": "obsidian",
+      "name": "Obsidian",
+      "category": "Notes et productivité",
+      "download_page": "https://obsidian.md/download",
+      "install": {
+        "windows": {"manager": "winget", "command": ["winget", "install", "--exact", "--id", "Obsidian.Obsidian", "--accept-source-agreements", "--accept-package-agreements"]},
+        "macos": {"manager": "homebrew", "command": ["brew", "install", "--cask", "obsidian"]},
+        "linux": {"flatpak": {"requires": ["flatpak", "remote Flathub configuré"], "command": ["flatpak", "install", "--user", "--assumeyes", "flathub", "md.obsidian.Obsidian"]}}
+      },
+      "raw_commands_by_version": {
+        "macos": {"14 Sonoma": "brew install --cask obsidian", "15 Sequoia": "brew install --cask obsidian", "26 Tahoe": "brew install --cask obsidian"},
+        "linux": {
+          "Ubuntu 22.04 LTS": "flatpak install --user --assumeyes flathub md.obsidian.Obsidian",
+          "Ubuntu 24.04 LTS": "flatpak install --user --assumeyes flathub md.obsidian.Obsidian",
+          "Ubuntu 26.04 LTS": "flatpak install --user --assumeyes flathub md.obsidian.Obsidian",
+          "Debian 12 Bookworm": "flatpak install --user --assumeyes flathub md.obsidian.Obsidian",
+          "Debian 13 Trixie": "flatpak install --user --assumeyes flathub md.obsidian.Obsidian",
+          "Fedora 42": "flatpak install --user --assumeyes flathub md.obsidian.Obsidian",
+          "Fedora 43": "flatpak install --user --assumeyes flathub md.obsidian.Obsidian",
+          "Fedora 44": "flatpak install --user --assumeyes flathub md.obsidian.Obsidian",
+          "Linux Mint 21.x": "flatpak install --user --assumeyes flathub md.obsidian.Obsidian",
+          "Linux Mint 22.x": "flatpak install --user --assumeyes flathub md.obsidian.Obsidian",
+          "Arch Linux rolling": "flatpak install --user --assumeyes flathub md.obsidian.Obsidian"
+        }
+      }
+    },
+    {
+      "id": "keepassxc",
+      "name": "KeePassXC",
+      "category": "Sécurité et mots de passe",
+      "download_page": "https://keepassxc.org/download/",
+      "install": {
+        "windows": {"manager": "winget", "command": ["winget", "install", "--exact", "--id", "KeePassXCTeam.KeePassXC", "--accept-source-agreements", "--accept-package-agreements"]},
+        "macos": {"manager": "homebrew", "command": ["brew", "install", "--cask", "keepassxc"]},
+        "linux": {"flatpak": {"requires": ["flatpak", "remote Flathub configuré"], "command": ["flatpak", "install", "--user", "--assumeyes", "flathub", "org.keepassxc.KeePassXC"]}}
+      },
+      "raw_commands_by_version": {
+        "macos": {"14 Sonoma": "brew install --cask keepassxc", "15 Sequoia": "brew install --cask keepassxc", "26 Tahoe": "brew install --cask keepassxc"},
+        "linux": {
+          "Ubuntu 22.04 LTS": "flatpak install --user --assumeyes flathub org.keepassxc.KeePassXC",
+          "Ubuntu 24.04 LTS": "flatpak install --user --assumeyes flathub org.keepassxc.KeePassXC",
+          "Ubuntu 26.04 LTS": "flatpak install --user --assumeyes flathub org.keepassxc.KeePassXC",
+          "Debian 12 Bookworm": "flatpak install --user --assumeyes flathub org.keepassxc.KeePassXC",
+          "Debian 13 Trixie": "flatpak install --user --assumeyes flathub org.keepassxc.KeePassXC",
+          "Fedora 42": "flatpak install --user --assumeyes flathub org.keepassxc.KeePassXC",
+          "Fedora 43": "flatpak install --user --assumeyes flathub org.keepassxc.KeePassXC",
+          "Fedora 44": "flatpak install --user --assumeyes flathub org.keepassxc.KeePassXC",
+          "Linux Mint 21.x": "flatpak install --user --assumeyes flathub org.keepassxc.KeePassXC",
+          "Linux Mint 22.x": "flatpak install --user --assumeyes flathub org.keepassxc.KeePassXC",
+          "Arch Linux rolling": "flatpak install --user --assumeyes flathub org.keepassxc.KeePassXC"
+        }
+      }
+    },
+    {
+      "id": "bitwarden",
+      "name": "Bitwarden",
+      "category": "Sécurité et mots de passe",
+      "download_page": "https://bitwarden.com/download/",
+      "install": {
+        "windows": {"manager": "winget", "command": ["winget", "install", "--exact", "--id", "Bitwarden.Bitwarden", "--accept-source-agreements", "--accept-package-agreements"]},
+        "macos": {"manager": "homebrew", "command": ["brew", "install", "--cask", "bitwarden"]},
+        "linux": {"flatpak": {"requires": ["flatpak", "remote Flathub configuré"], "command": ["flatpak", "install", "--user", "--assumeyes", "flathub", "com.bitwarden.desktop"]}}
+      },
+      "raw_commands_by_version": {
+        "macos": {"14 Sonoma": "brew install --cask bitwarden", "15 Sequoia": "brew install --cask bitwarden", "26 Tahoe": "brew install --cask bitwarden"},
+        "linux": {
+          "Ubuntu 22.04 LTS": "flatpak install --user --assumeyes flathub com.bitwarden.desktop",
+          "Ubuntu 24.04 LTS": "flatpak install --user --assumeyes flathub com.bitwarden.desktop",
+          "Ubuntu 26.04 LTS": "flatpak install --user --assumeyes flathub com.bitwarden.desktop",
+          "Debian 12 Bookworm": "flatpak install --user --assumeyes flathub com.bitwarden.desktop",
+          "Debian 13 Trixie": "flatpak install --user --assumeyes flathub com.bitwarden.desktop",
+          "Fedora 42": "flatpak install --user --assumeyes flathub com.bitwarden.desktop",
+          "Fedora 43": "flatpak install --user --assumeyes flathub com.bitwarden.desktop",
+          "Fedora 44": "flatpak install --user --assumeyes flathub com.bitwarden.desktop",
+          "Linux Mint 21.x": "flatpak install --user --assumeyes flathub com.bitwarden.desktop",
+          "Linux Mint 22.x": "flatpak install --user --assumeyes flathub com.bitwarden.desktop",
+          "Arch Linux rolling": "flatpak install --user --assumeyes flathub com.bitwarden.desktop"
+        }
+      }
+    },
+    {
+      "id": "steam",
+      "name": "Steam",
+      "category": "Jeux",
+      "download_page": "https://store.steampowered.com/about/",
+      "install": {
+        "windows": {"manager": "winget", "command": ["winget", "install", "--exact", "--id", "Valve.Steam", "--accept-source-agreements", "--accept-package-agreements"]},
+        "macos": {"manager": "homebrew", "command": ["brew", "install", "--cask", "steam"]},
+        "linux": {"flatpak": {"requires": ["flatpak", "remote Flathub configuré"], "command": ["flatpak", "install", "--user", "--assumeyes", "flathub", "com.valvesoftware.Steam"]}}
+      },
+      "raw_commands_by_version": {
+        "macos": {"14 Sonoma": "brew install --cask steam", "15 Sequoia": "brew install --cask steam", "26 Tahoe": "brew install --cask steam"},
+        "linux": {
+          "Ubuntu 22.04 LTS": "flatpak install --user --assumeyes flathub com.valvesoftware.Steam",
+          "Ubuntu 24.04 LTS": "flatpak install --user --assumeyes flathub com.valvesoftware.Steam",
+          "Ubuntu 26.04 LTS": "flatpak install --user --assumeyes flathub com.valvesoftware.Steam",
+          "Debian 12 Bookworm": "flatpak install --user --assumeyes flathub com.valvesoftware.Steam",
+          "Debian 13 Trixie": "flatpak install --user --assumeyes flathub com.valvesoftware.Steam",
+          "Fedora 42": "flatpak install --user --assumeyes flathub com.valvesoftware.Steam",
+          "Fedora 43": "flatpak install --user --assumeyes flathub com.valvesoftware.Steam",
+          "Fedora 44": "flatpak install --user --assumeyes flathub com.valvesoftware.Steam",
+          "Linux Mint 21.x": "flatpak install --user --assumeyes flathub com.valvesoftware.Steam",
+          "Linux Mint 22.x": "flatpak install --user --assumeyes flathub com.valvesoftware.Steam",
+          "Arch Linux rolling": "flatpak install --user --assumeyes flathub com.valvesoftware.Steam"
+        }
+      }
+    },
+    {
+      "id": "qbittorrent",
+      "name": "qBittorrent",
+      "category": "Téléchargements",
+      "download_page": "https://www.qbittorrent.org/download",
+      "install": {
+        "windows": {"manager": "winget", "command": ["winget", "install", "--exact", "--id", "qBittorrent.qBittorrent", "--accept-source-agreements", "--accept-package-agreements"]},
+        "macos": {"manager": "homebrew", "command": ["brew", "install", "--cask", "qbittorrent"]},
+        "linux": {"flatpak": {"requires": ["flatpak", "remote Flathub configuré"], "command": ["flatpak", "install", "--user", "--assumeyes", "flathub", "org.qbittorrent.qBittorrent"]}}
+      },
+      "raw_commands_by_version": {
+        "macos": {"14 Sonoma": "brew install --cask qbittorrent", "15 Sequoia": "brew install --cask qbittorrent", "26 Tahoe": "brew install --cask qbittorrent"},
+        "linux": {
+          "Ubuntu 22.04 LTS": "flatpak install --user --assumeyes flathub org.qbittorrent.qBittorrent",
+          "Ubuntu 24.04 LTS": "flatpak install --user --assumeyes flathub org.qbittorrent.qBittorrent",
+          "Ubuntu 26.04 LTS": "flatpak install --user --assumeyes flathub org.qbittorrent.qBittorrent",
+          "Debian 12 Bookworm": "flatpak install --user --assumeyes flathub org.qbittorrent.qBittorrent",
+          "Debian 13 Trixie": "flatpak install --user --assumeyes flathub org.qbittorrent.qBittorrent",
+          "Fedora 42": "flatpak install --user --assumeyes flathub org.qbittorrent.qBittorrent",
+          "Fedora 43": "flatpak install --user --assumeyes flathub org.qbittorrent.qBittorrent",
+          "Fedora 44": "flatpak install --user --assumeyes flathub org.qbittorrent.qBittorrent",
+          "Linux Mint 21.x": "flatpak install --user --assumeyes flathub org.qbittorrent.qBittorrent",
+          "Linux Mint 22.x": "flatpak install --user --assumeyes flathub org.qbittorrent.qBittorrent",
+          "Arch Linux rolling": "flatpak install --user --assumeyes flathub org.qbittorrent.qBittorrent"
+        }
+      }
+    },
+    {
+      "id": "postman",
+      "name": "Postman",
+      "category": "Développement API",
+      "download_page": "https://www.postman.com/downloads/",
+      "install": {
+        "windows": {"manager": "winget", "command": ["winget", "install", "--exact", "--id", "Postman.Postman", "--accept-source-agreements", "--accept-package-agreements"]},
+        "macos": {"manager": "homebrew", "command": ["brew", "install", "--cask", "postman"]},
+        "linux": {"flatpak": {"requires": ["flatpak", "remote Flathub configuré"], "command": ["flatpak", "install", "--user", "--assumeyes", "flathub", "com.getpostman.Postman"]}}
+      },
+      "raw_commands_by_version": {
+        "macos": {"14 Sonoma": "brew install --cask postman", "15 Sequoia": "brew install --cask postman", "26 Tahoe": "brew install --cask postman"},
+        "linux": {
+          "Ubuntu 22.04 LTS": "flatpak install --user --assumeyes flathub com.getpostman.Postman",
+          "Ubuntu 24.04 LTS": "flatpak install --user --assumeyes flathub com.getpostman.Postman",
+          "Ubuntu 26.04 LTS": "flatpak install --user --assumeyes flathub com.getpostman.Postman",
+          "Debian 12 Bookworm": "flatpak install --user --assumeyes flathub com.getpostman.Postman",
+          "Debian 13 Trixie": "flatpak install --user --assumeyes flathub com.getpostman.Postman",
+          "Fedora 42": "flatpak install --user --assumeyes flathub com.getpostman.Postman",
+          "Fedora 43": "flatpak install --user --assumeyes flathub com.getpostman.Postman",
+          "Fedora 44": "flatpak install --user --assumeyes flathub com.getpostman.Postman",
+          "Linux Mint 21.x": "flatpak install --user --assumeyes flathub com.getpostman.Postman",
+          "Linux Mint 22.x": "flatpak install --user --assumeyes flathub com.getpostman.Postman",
+          "Arch Linux rolling": "flatpak install --user --assumeyes flathub com.getpostman.Postman"
+        }
+      }
+    },
+    {
+      "id": "krita",
+      "name": "Krita",
+      "category": "Peinture numérique",
+      "download_page": "https://krita.org/en/download/",
+      "install": {
+        "windows": {"manager": "winget", "command": ["winget", "install", "--exact", "--id", "KDE.Krita", "--accept-source-agreements", "--accept-package-agreements"]},
+        "macos": {"manager": "homebrew", "command": ["brew", "install", "--cask", "krita"]},
+        "linux": {"flatpak": {"requires": ["flatpak", "remote Flathub configuré"], "command": ["flatpak", "install", "--user", "--assumeyes", "flathub", "org.kde.krita"]}}
+      },
+      "raw_commands_by_version": {
+        "macos": {"14 Sonoma": "brew install --cask krita", "15 Sequoia": "brew install --cask krita", "26 Tahoe": "brew install --cask krita"},
+        "linux": {
+          "Ubuntu 22.04 LTS": "flatpak install --user --assumeyes flathub org.kde.krita",
+          "Ubuntu 24.04 LTS": "flatpak install --user --assumeyes flathub org.kde.krita",
+          "Ubuntu 26.04 LTS": "flatpak install --user --assumeyes flathub org.kde.krita",
+          "Debian 12 Bookworm": "flatpak install --user --assumeyes flathub org.kde.krita",
+          "Debian 13 Trixie": "flatpak install --user --assumeyes flathub org.kde.krita",
+          "Fedora 42": "flatpak install --user --assumeyes flathub org.kde.krita",
+          "Fedora 43": "flatpak install --user --assumeyes flathub org.kde.krita",
+          "Fedora 44": "flatpak install --user --assumeyes flathub org.kde.krita",
+          "Linux Mint 21.x": "flatpak install --user --assumeyes flathub org.kde.krita",
+          "Linux Mint 22.x": "flatpak install --user --assumeyes flathub org.kde.krita",
+          "Arch Linux rolling": "flatpak install --user --assumeyes flathub org.kde.krita"
+        }
+      }
+    }
+  ]
+}

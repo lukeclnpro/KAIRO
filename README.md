@@ -14,7 +14,8 @@
 - 🧠 Utilisation de modèles locaux via Ollama
 - 💬 Gestion des conversations
 - ⚙️ Configuration de l'IA
-- 🌐 Serveur web local pour accéder à l'IA depuis le réseau
+- 🔑 Connexion OpenRouter et création de clés API depuis la GUI
+- 📦 Installation d'applications depuis le terminal ou l'interface graphique
 - 📦 Installation et gestion des modèles Ollama
 - 🔄 Vérification et installation des mises à jour
 - 🗑️ Script de désinstallation
@@ -70,6 +71,12 @@ cd $HOME/Documents/KAIRO
 python main.py
 ```
 
+Dans la GUI, **Gérer les conversations** permet de rechercher et classer les échanges, ouvrir, renommer, modifier les messages, copier, importer, exporter ou supprimer une conversation.
+
+## 🔑 Connexion OpenRouter dans la GUI
+
+Dans KAIRO, choisis **Connexion / création**. Lors de la création d'un compte local, accepte l'ouverture du navigateur pour te connecter à OpenRouter et autoriser la création d'une clé. Pour un compte déjà connecté, ouvre **Gérer les clés API**, puis **Créer via OpenRouter**. La clé est échangée avec PKCE, enregistrée dans le compte local chiffré et n'est pas affichée. La saisie manuelle d'une clé existante reste disponible. Après authentification, le mot de passe du compte local est mémorisé dans le trousseau sécurisé du système pour gérer les clés sans le ressaisir. Les formulaires et confirmations restent dans la fenêtre GUI; les sélecteurs de fichiers utilisent le sélecteur natif du système.
+
 ## 🧰 Commandes utiles
 
 Afficher l'aide :
@@ -92,23 +99,9 @@ python uninstall.py
 
 > Le script de désinstallation est disponible à partir de la version `0.1.6`.
 
-## 🌐 Serveur web
+## 📦 Installer une application
 
-Le serveur web écoute uniquement sur `127.0.0.1` par défaut. Pour autoriser l'accès depuis le réseau local, démarrez-le explicitement sur toutes les interfaces :
-
-Lancement :
-
-```bash
-python server.py
-```
-
-Accès réseau authentifié :
-
-```bash
-python server.py --host 0.0.0.0
-```
-
-Un jeton aléatoire est affiché au démarrage; connectez-vous avec l'utilisateur `kairo` et ce jeton. Les commandes et lancements de programmes restent réservés aux clients locaux. Le trafic HTTP n'étant pas chiffré, n'exposez pas ce serveur sur un réseau non fiable.
+Dans le menu de `python main.py`, choisissez **Installer une application**. Dans l'interface graphique, utilisez le bouton **Installer une application**. Les deux versions lisent `program_catalog.json`, affichent la commande et demandent confirmation avant de la lancer avec le gestionnaire de paquets disponible.
 
 ## 🧪 Tests
 
@@ -118,6 +111,12 @@ Installez les dépendances du projet et les outils de développement, puis lance
 python3 -m pip install -r requirements.txt pytest ruff
 ruff check .
 python3 -m pytest
+```
+
+Évaluer les parcours de réponse sans appeler de modèle ni accéder au réseau :
+
+```bash
+python3 scripts/response_evaluation.py
 ```
 
 Le test réel de connexion OpenRouter est manuel et séparé de la suite :
@@ -147,32 +146,12 @@ Le contenu ci-dessous est **généré automatiquement** à partir de ces deux fi
 
 <!-- UPDATES:START -->
 <details>
-<summary>Version `0.2.0.11(beta11)` — 2026-10-02 · **Gestion des clés API et performances (beta11)**</summary>
-
-- Ajout d'un menu dédié aux clés OpenRouter : aperçu masqué, consultation de l'usage par clé, ajout, suppression et activation ou désactivation.
-- L'état actif des clés est conservé dans le compte chiffré; seules les clés activées sont utilisées et le compte conserve toujours au moins une clé active.
-- L'exécution de commandes suit désormais une politique restrictive : les commandes inconnues ou capables d'exécuter du code nécessitent une confirmation.
-- Les embeddings des souvenirs sont stockés dans SQLite, avec migration des bases existantes et calcul limité aux requêtes ou aux souvenirs encore non indexés.
-- Les sauvegardes de conversations utilisent deepcopy et un JSON compact pour réduire le coût de sérialisation et la taille des fichiers.
-- Centralisation des requêtes HTTP avec validation des URL HTTP(S) et retries réservés aux requêtes GET et HEAD.
-- La suite atteint 286 tests; Ruff et pytest passent dans le workflow CI.
-
-</details>
-
-<details>
-<summary>Version `0.2.0.10(beta10)` — 2026-10-01 · **Connexion mémorisée, sécurité et architecture (beta10)**</summary>
+<summary>Version `0.2.0.10(beta10)` — 2026-10-01 · **Connexion mémorisée et lancement direct du GUI (beta10)**</summary>
 
 - Les sessions de compte sont conservées dans le trousseau sécurisé du système et restaurées au démarrage du GUI et du CLI.
 - Le clic sur l’icône rapide ouvre désormais le GUI; l’action dédiée au terminal reste disponible.
 - Correction du doublon du bouton Paramètres dans le GUI.
 - L’auto-updater inclut désormais LICENSE et THIRD_PARTY_NOTICES.md et vérifie leur présence avant l’installation.
-- Le serveur web écoute sur localhost par défaut; l’accès réseau exige un jeton et les commandes restent réservées aux clients locaux.
-- Les commandes inconnues nécessitent désormais une confirmation; seules les commandes de lecture explicitement autorisées s’exécutent directement.
-- Le dispatch POST du serveur est organisé par routes et les flux de création, fermeture et chat sont couverts par des tests HTTP.
-- Le catalogue, le scan et les menus de modèles, l’aide du CLI et les fonctions de mise à jour sont séparés dans le package local_ia.
-- Les embeddings des souvenirs sont stockés dans SQLite et les bases existantes sont migrées automatiquement; les sauvegardes de conversations utilisent des instantanés profonds et du JSON compact.
-- Les appels HTTP partagent un client qui valide les URL HTTP(S) et limite les retries aux requêtes GET et HEAD.
-- Ajout de pytest, Ruff et d'un workflow GitHub Actions; la suite compte 280 tests.
 
 </details>
 
@@ -225,7 +204,7 @@ Le contenu ci-dessous est **généré automatiquement** à partir de ces deux fi
 - Mémorisation persistante des chemins et alias d'applications fournis dans la conversation, avec tolérance aux fautes de frappe courantes.
 - Compréhension des corrections contextuelles comme « WhatsApp s'appelle ZapZap » après un lancement infructueux.
 - Protection contre l'interprétation d'appels d'outils recopiés comme des chemins d'application.
-- Génération et mise à jour automatiques du titre de conversation selon son sujet, affiché dans l'interface web et le CLI.
+- Génération et mise à jour automatiques du titre de conversation selon son sujet, affiché dans le CLI.
 - Conservation des sujets de conversation définis manuellement.
 
 </details>
@@ -357,12 +336,12 @@ python main.py force_update
 ```text
 KAIRO/
 ├── main.py                 # Programme principal
-├── server.py               # Serveur web local
+├── program_commands.py     # Catalogue et installation d'applications
+├── program_catalog.json   # Commandes d'installation par système
 ├── local_ia/               # Package de l'agent IA
 │   ├── core/               # Agent, contexte, mémoire, conversations
 │   ├── llm/                # Client Ollama
 │   ├── tools/              # Outils utilisés par l'agent
-│   ├── web/                # Serveur et API web
 │   └── cli/                # Interface terminal
 ├── ui.py                   # Interface terminal
 ├── setup.py                # Installation
@@ -371,7 +350,6 @@ KAIRO/
 ├── version.json            # Version actuelle
 ├── update.json             # Journal des mises à jour
 ├── list.json               # Modèles Ollama détectés
-├── web/                    # Interface web
 └── scripts/
     └── generate_readme.py  # Génération du README dynamique
 ```
@@ -450,7 +428,7 @@ ou :
 Nouveau contenu du fichier.
 ```
 
-Par sécurité, le serveur limite par défaut les accès au dossier de Local IA. Des dossiers supplémentaires peuvent être autorisés avec `file_access_roots` dans `config.json` :
+Par sécurité, les accès aux fichiers sont limités par défaut au dossier de Local IA. Des dossiers supplémentaires peuvent être autorisés avec `file_access_roots` dans `config.json` :
 
 ```json
 {
@@ -488,6 +466,6 @@ L'IA peut demander l'exécution d'une commande selon le contexte lorsqu'un utili
 }
 ```
 
-Les commandes sont transmises sous forme d'arguments séparés et ne passent jamais par un shell : les pipes, redirections et enchaînements shell ne sont pas interprétés. Si l'IA propose une commande sans demande explicite, elle demande d'abord une confirmation; répondre « oui » exécute uniquement cette commande. La désactivation par défaut est recommandée lorsque le serveur est accessible sur le réseau.
+Les commandes sont transmises sous forme d'arguments séparés et ne passent jamais par un shell : les pipes, redirections et enchaînements shell ne sont pas interprétés. Si l'IA propose une commande sans demande explicite, elle demande d'abord une confirmation; répondre « oui » exécute uniquement cette commande.
 
 Pour une application, l'IA recherche un nom exact dans les applications installées puis la lance. Elle ne lance pas une application dont le nom est seulement ressemblant. Sous Linux, les fichiers `.desktop` sont recherchés dans les dossiers d'applications utilisateur et système; « Word » peut utiliser LibreOffice comme alternative lorsqu'il est installé.
