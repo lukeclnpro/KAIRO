@@ -6,7 +6,9 @@ from __future__ import annotations
 import json
 import sys
 import unittest
+from io import BytesIO
 from pathlib import Path
+from urllib.error import HTTPError
 from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -73,6 +75,41 @@ class OllamaClientTest(unittest.TestCase):
         self.assertEqual(
             [call.args[0].headers["Authorization"] for call in urlopen.call_args_list],
             ["Bearer task-key-alpha", "Bearer task-key-beta"],
+        )
+
+    def test_pinned_stage_key_is_reused_for_every_context_chunk(self):
+        config = {
+            "openrouter": {
+                "model": "openai/gpt-4o-mini",
+                "base_url": "https://openrouter.ai/api/v1",
+                "timeout": 30,
+            },
+        }
+        large_messages = [
+            {"role": "user", "content": "étape " * 1500},
+            {"role": "assistant", "content": "résultat " * 1500},
+        ]
+
+        def fake_urlopen(_request, timeout=None):
+            response = MagicMock()
+            response.__enter__.return_value.read.return_value = (
+                b'{"choices":[{"message":{"content":"ok"}}]}'
+            )
+            return response
+
+        with patch.dict(
+            "os.environ",
+            {"LOCAL_IA_OPENROUTER_KEYS": json.dumps(["pool-key-1", "pool-key-2"])},
+            clear=True,
+        ), patch("local_ia.llm.ollama.load_config", return_value=config), patch(
+            "local_ia.llm.ollama.urlopen", side_effect=fake_urlopen
+        ) as urlopen:
+            ask_ollama(large_messages, api_key="stage-key-2")
+
+        self.assertGreater(urlopen.call_count, 1)
+        self.assertEqual(
+            {call.args[0].headers["Authorization"] for call in urlopen.call_args_list},
+            {"Bearer stage-key-2"},
         )
 
     def test_blank_model_uses_configured_model(self):
@@ -146,6 +183,60 @@ class OllamaClientTest(unittest.TestCase):
         payload = json.loads(urlopen.call_args.args[0].data)
         self.assertEqual(payload["model"], "openai/gpt-4o-mini")
         self.assertEqual(payload["max_tokens"], 4096)
+
+    def test_unavailable_openrouter_model_retries_with_default_model(self):
+        config = {
+            "openrouter": {
+                "model": "anthropic/claude-3.5-sonnet",
+                "base_url": "https://openrouter.ai/api/v1",
+                "timeout": 30,
+            },
+        }
+        success = MagicMock()
+        success.__enter__.return_value.read.return_value = (
+            b'{"choices":[{"message":{"content":"modification prete"}}]}'
+        )
+        def unavailable_error():
+            return HTTPError(
+                "https://openrouter.ai/api/v1/chat/completions",
+                404,
+                "Not Found",
+                {},
+                BytesIO(b'{"error":{"message":"No endpoints found for model"}}'),
+            )
+        with patch.dict("os.environ", {"LOCAL_IA_OPENROUTER_KEY": "secret-key"}), \
+             patch("local_ia.llm.ollama.load_config", return_value=config), \
+             patch("local_ia.llm.ollama.urlopen", side_effect=[unavailable_error(), unavailable_error(), success]) as urlopen:
+            answer = ask_ollama([], model="anthropic/claude-3.5-sonnet")
+
+        self.assertEqual(answer, "modification prete")
+        self.assertEqual(urlopen.call_count, 3)
+        final_payload = json.loads(urlopen.call_args.args[0].data)
+        self.assertEqual(final_payload["model"], "openai/gpt-4o-mini")
+
+    def test_other_openrouter_http_errors_do_not_switch_models(self):
+        config = {
+            "openrouter": {
+                "model": "anthropic/claude-3.5-sonnet",
+                "base_url": "https://openrouter.ai/api/v1",
+                "timeout": 30,
+            },
+        }
+        def unauthorized_error():
+            return HTTPError(
+                "https://openrouter.ai/api/v1/chat/completions",
+                401,
+                "Unauthorized",
+                {},
+                BytesIO(b'{"error":{"message":"Invalid API key"}}'),
+            )
+        with patch.dict("os.environ", {"LOCAL_IA_OPENROUTER_KEY": "secret-key"}), \
+             patch("local_ia.llm.ollama.load_config", return_value=config), \
+             patch("local_ia.llm.ollama.urlopen", side_effect=[unauthorized_error(), unauthorized_error()]) as urlopen:
+            with self.assertRaisesRegex(ValueError, "Invalid API key"):
+                ask_ollama([], model="anthropic/claude-3.5-sonnet")
+
+        self.assertEqual(urlopen.call_count, 2)
 
     def test_openrouter_key_usage_uses_active_runtime_key(self):
         config = {

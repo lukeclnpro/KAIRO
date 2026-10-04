@@ -165,6 +165,49 @@ class ConversationTest(unittest.TestCase):
         self.assertNotIn("\n", saved_text)
         self.assertEqual(json.loads(saved_text)["messages"][0]["content"], "Bonjour")
 
+    def test_conversation_can_be_renamed_classified_copied_and_deleted(self):
+        chat = conversation.create_chat()
+        conversation.add_chat_message(chat, "user", "Projet de voyage")
+        conversation.rename_chat(chat["id"], "Voyage en Italie")
+        conversation.set_chat_category(chat["id"], "Personnel")
+
+        duplicate = conversation.copy_chat(chat["id"])
+
+        self.assertNotEqual(duplicate["id"], chat["id"])
+        self.assertEqual(duplicate["custom_title"], "Voyage en Italie (copie)")
+        self.assertEqual(duplicate["category"], "Personnel")
+        self.assertEqual(duplicate["messages"], chat["messages"])
+        self.assertTrue(conversation.delete_chat(chat["id"]))
+        self.assertFalse(conversation.delete_chat(chat["id"]))
+        self.assertIsNotNone(conversation.load_chat(duplicate["id"]))
+
+    def test_conversation_can_be_exported_and_imported_with_a_fresh_id(self):
+        chat = conversation.create_chat()
+        conversation.add_chat_message(chat, "user", "Question exportée")
+        conversation.rename_chat(chat["id"], "Archive")
+        conversation.set_chat_category(chat["id"], "Projets")
+        export_path = self.chat_dir.parent / "archive.json"
+
+        conversation.export_chat(chat["id"], export_path)
+        imported = conversation.import_chat(export_path)
+
+        self.assertNotEqual(imported["id"], chat["id"])
+        self.assertEqual(imported["custom_title"], "Archive")
+        self.assertEqual(imported["category"], "Projets")
+        self.assertEqual(imported["messages"][0]["content"], "Question exportée")
+        self.assertNotIn("pending_tool", imported)
+
+    def test_import_rejects_invalid_message_entries(self):
+        with self.assertRaisesRegex(ValueError, "message de la conversation est invalide"):
+            conversation.import_chat({"messages": [None]})
+
+    def test_import_repairs_missing_metadata_defaults(self):
+        imported = conversation.import_chat({"messages": [], "files": []})
+
+        self.assertEqual(imported["custom_title"], "")
+        self.assertEqual(imported["category"], "")
+        self.assertEqual(imported["messages"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

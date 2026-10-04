@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -25,6 +26,81 @@ class CodeProjectsTest(unittest.TestCase):
         self.assertEqual(created, resumed)
         self.assertTrue(created.is_dir())
         self.assertEqual(code_projects.list_projects(), [created])
+
+    def test_project_category_persists_and_can_be_removed(self):
+        project = code_projects.create_or_open_project("categorized-project")
+
+        code_projects.set_project_category(project, "Personnel")
+        self.assertEqual(code_projects.get_project_category(project), "Personnel")
+
+        code_projects.set_project_category(project, " ")
+        self.assertEqual(code_projects.get_project_category(project), "")
+
+    def test_project_tool_permissions_preserve_other_metadata(self):
+        project = code_projects.create_or_open_project("tool-permissions")
+
+        code_projects.set_project_category(project, "Personnel")
+        code_projects.set_project_disabled_tools(project, {"write", "command"})
+
+        self.assertEqual(code_projects.get_project_category(project), "Personnel")
+        self.assertEqual(code_projects.get_project_disabled_tools(project), {"write", "command"})
+
+        code_projects.set_project_disabled_tools(project, set())
+        self.assertEqual(code_projects.get_project_disabled_tools(project), set())
+        self.assertEqual(code_projects.get_project_category(project), "Personnel")
+
+    def test_project_tasks_persist_alongside_existing_metadata(self):
+        project = code_projects.create_or_open_project("tasks-project")
+        code_projects.set_project_category(project, "Travail")
+        tasks = [{"id": "1", "title": "Écrire les tests", "status": "todo"}]
+
+        code_projects.save_project_tasks(project, tasks)
+
+        self.assertEqual(code_projects.list_project_tasks(project), tasks)
+        self.assertEqual(code_projects.get_project_category(project), "Travail")
+
+    def test_project_export_and_import_round_trip(self):
+        project = code_projects.create_or_open_project("archive-project")
+        (project / "src").mkdir()
+        (project / "src" / "main.py").write_text("print('ok')\n", encoding="utf-8")
+        code_projects.set_project_category(project, "Personnel")
+        archive_path = Path(self.directory.name) / "archive.zip"
+
+        code_projects.export_project(project, archive_path)
+        code_projects.delete_project(project)
+        imported = code_projects.import_project(archive_path)
+
+        self.assertEqual(imported.name, "archive-project")
+        self.assertEqual((imported / "src" / "main.py").read_text(encoding="utf-8"), "print('ok')\n")
+        self.assertEqual(code_projects.get_project_category(imported), "Personnel")
+
+    def test_empty_project_export_and_import_round_trip(self):
+        project = code_projects.create_or_open_project("empty-project")
+        archive_path = Path(self.directory.name) / "empty.zip"
+
+        code_projects.export_project(project, archive_path)
+        code_projects.delete_project(project)
+        imported = code_projects.import_project(archive_path)
+
+        self.assertEqual(imported.name, "empty-project")
+        self.assertTrue(imported.is_dir())
+
+    def test_project_import_rejects_archive_path_traversal(self):
+        archive_path = Path(self.directory.name) / "unsafe.zip"
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            archive.writestr("unsafe-project/../../outside.txt", "bad")
+
+        with self.assertRaises(ValueError):
+            code_projects.import_project(archive_path)
+        self.assertFalse((self.projects_root.parent / "outside.txt").exists())
+
+    def test_delete_project_removes_project_directory(self):
+        project = code_projects.create_or_open_project("to-delete")
+        (project / "main.py").write_text("print('bye')\n", encoding="utf-8")
+
+        code_projects.delete_project(project)
+
+        self.assertFalse(project.exists())
 
     def test_rejects_path_traversal_and_invalid_names(self):
         for name in ("../outside", "..", "bad/name", "CON"):

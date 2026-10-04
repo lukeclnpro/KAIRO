@@ -15,7 +15,8 @@ class FinalArchitectureTest(unittest.TestCase):
             get_version(),
             (metadata["version"], metadata["patch"], metadata["modified_at"]),
         )
-        self.assertIn("0.2.0.10(beta10)", render_version(metadata))
+        expected_version = f"{metadata['version']}.{metadata['patch']}(beta{metadata['patch']})"
+        self.assertIn(expected_version, render_version(metadata))
 
     def test_final_target_modules_are_available(self):
         import local_ia.core.memory_manager

@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import file_commands
-from local_ia.tools import write as write_tool
+from local_ia.tools import download as download_tool, write as write_tool
 
 
 class FileCommandsTest(unittest.TestCase):
@@ -86,6 +86,36 @@ class FileCommandsTest(unittest.TestCase):
             write_tool.use("/home/luke/Telechargements/mon_dossier", "12345", "txt")
         written_path = write_file.call_args.args[0]
         self.assertTrue(written_path.endswith("mon_dossier.txt"))
+
+    def test_download_tool_creates_a_cache_artifact(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            download_tool, "CACHE_DIR", Path(directory)
+        ), patch.object(download_tool, "GENERATED_FILES_DIR", Path(directory) / "generated"):
+            artifact = download_tool.use("rapport", "résultat", "txt")
+            cached_file = download_tool.resolve_cached_file(artifact["artifact_id"], "rapport.txt")
+            persistent_file = download_tool.GENERATED_FILES_DIR / "rapport.txt"
+
+            self.assertEqual(cached_file.read_text(encoding="utf-8"), "résultat")
+            self.assertEqual(persistent_file.read_text(encoding="utf-8"), "résultat")
+            self.assertEqual(artifact["size"], len("résultat".encode("utf-8")))
+
+    def test_download_tool_rejects_a_path_as_filename(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            download_tool, "CACHE_DIR", Path(directory)
+        ), patch.object(download_tool, "GENERATED_FILES_DIR", Path(directory) / "generated"), self.assertRaises(ValueError):
+            download_tool.use("../outside.txt", "blocked")
+
+    def test_download_tool_preserves_existing_generated_files(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            download_tool, "CACHE_DIR", Path(directory) / "cache"
+        ), patch.object(download_tool, "GENERATED_FILES_DIR", Path(directory) / "generated"):
+            first = download_tool.use("rapport.txt", "première version")
+            second = download_tool.use("rapport.txt", "deuxième version")
+
+            self.assertEqual(first["filename"], "rapport.txt")
+            self.assertEqual(second["filename"], "rapport-2.txt")
+            self.assertEqual((Path(directory) / "generated" / "rapport.txt").read_text(encoding="utf-8"), "première version")
+            self.assertEqual((Path(directory) / "generated" / "rapport-2.txt").read_text(encoding="utf-8"), "deuxième version")
 
 
 if __name__ == "__main__":

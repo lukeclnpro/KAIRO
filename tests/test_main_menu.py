@@ -52,9 +52,12 @@ class MainMenuProviderTest(unittest.TestCase):
         gui_module = ModuleType("local_ia.gui")
         gui_module.run_gui = lambda: 23
 
-        with patch.dict("sys.modules", {"local_ia.gui": gui_module}), \
-             patch.object(main.sys, "argv", ["main.py", "gui"]):
-            self.assertEqual(main.main(), 23)
+        with patch.dict("sys.modules", {"local_ia.gui": gui_module}):
+            with patch.object(main.sys, "argv", ["main.py", "gui"]):
+                with patch.object(main, "create_start_menu_shortcut") as create_shortcut:
+                    self.assertEqual(main.main(), 23)
+
+                    create_shortcut.assert_called_once_with(main.BASE_DIR)
 
     def test_startup_login_choice_authenticates_local_account(self):
         with patch.dict("os.environ", {}, clear=True), \
@@ -160,6 +163,27 @@ class MainMenuProviderTest(unittest.TestCase):
 
         self.assertTrue({"2", "3", "4"}.issubset(option_numbers))
         self.assertIn("10", option_numbers)
+        self.assertEqual(dict(options)["6"], "Installer une application")
+
+    def test_catalog_install_requires_confirmation_before_execution(self):
+        programs = [{"id": "firefox", "name": "Firefox", "category": "Navigateur"}]
+        plan = {
+            "manager": "flatpak",
+            "command": ["flatpak", "install", "org.mozilla.firefox"],
+            "requires": [],
+        }
+        with patch.object(main.program_commands, "get_catalog_programs", return_value=programs), \
+             patch.object(main.program_commands, "get_installation_plan", return_value=plan), \
+             patch.object(main.program_commands, "execute_install_command") as execute, \
+             patch.object(main, "pause"), \
+             patch.object(main.ui, "section_title"), \
+             patch("builtins.print"), \
+             patch.object(main.ui, "print_info") as print_info:
+            answers = iter(("1", "n"))
+            main.install_catalog_application(input_fn=lambda _prompt: next(answers))
+
+        execute.assert_not_called()
+        print_info.assert_called_once_with("Installation annulée.")
 
     def test_app_menu_remains_available_without_ollama(self):
         with patch.object(main.sys, "argv", ["main.py"]), \

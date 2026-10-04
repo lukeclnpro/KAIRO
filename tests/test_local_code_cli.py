@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -60,6 +61,19 @@ class LocalCodeCliTest(unittest.TestCase):
         self.assertNotIn("command", interface._local_code_tools({"command_execution": {"enabled": False}}))
         self.assertIn("command", interface._local_code_tools({"command_execution": {"enabled": True}}))
 
+    def test_cli_status_displays_agent_progress_events(self):
+        class FakeAgent:
+            def respond(self, *_args, progress_callback=None, **_kwargs):
+                progress_callback("Étape 1/2 : Recherche…")
+                return "Résultat prêt."
+
+        output = StringIO()
+        with patch("sys.stdout", output):
+            answer = interface._respond_with_status(FakeAgent(), {}, "question")
+
+        self.assertEqual(answer, "Résultat prêt.")
+        self.assertIn("Étape 1/2 : Recherche…", output.getvalue())
+
     def test_local_code_instructions_require_autonomous_completion(self):
         instructions = interface._local_code_instructions(self.projects_root / "demo", False)
         self.assertIn("agent de développement autonome", instructions)
@@ -91,8 +105,12 @@ class LocalCodeCliTest(unittest.TestCase):
 
         self.assertEqual(result, "Proposition refusée ou annulée. Aucun fichier n'a été modifié.")
         self.assertEqual(len(agent.calls), 1)
-        self.assertEqual(agent.calls[0][1]["allowed_tools"], interface.LOCAL_CODE_READ_TOOLS)
-        self.assertIn("lecture seule", agent.calls[0][1]["external_info"])
+        self.assertEqual(
+            agent.calls[0][1]["allowed_tools"],
+            {"file", "list", "search", "write", "edit"},
+        )
+        self.assertTrue(agent.calls[0][1]["defer_file_actions"])
+        self.assertIn("uniquement un appel", agent.calls[0][1]["external_info"])
         self.assertEqual(displayed, [("assistant", "Diagnostic et diff proposés.")])
 
     def test_code_loop_applies_only_after_explicit_approval(self):
@@ -100,10 +118,15 @@ class LocalCodeCliTest(unittest.TestCase):
 
         class FakeAgent:
             calls = []
+            applied = []
 
             def respond(self, chat, request, **kwargs):
                 self.calls.append((request, kwargs))
-                return "Diff approuvé." if len(self.calls) == 1 else "Correctif appliqué et testé."
+                return '<tool_call>{"tool":"write","arguments":{"path":"main.py","content":"ok"}}</tool_call>'
+
+            def apply_approved_file_call(self, proposal, chat, allowed_tools=None):
+                self.applied.append((proposal, allowed_tools))
+                return "Fichier créé ou modifié : main.py"
 
         agent = FakeAgent()
         result = interface._run_local_code_loop(
@@ -116,12 +139,10 @@ class LocalCodeCliTest(unittest.TestCase):
             display=lambda role, content: None,
         )
 
-        self.assertEqual(result, "Correctif appliqué et testé.")
-        self.assertEqual(len(agent.calls), 2)
-        self.assertEqual(agent.calls[0][1]["allowed_tools"], interface.LOCAL_CODE_READ_TOOLS)
-        self.assertIn("Diff approuvé.", agent.calls[1][0])
-        self.assertIn("uniquement la proposition approuvée", agent.calls[1][1]["external_info"])
-        self.assertIn("command", agent.calls[1][1]["allowed_tools"])
+        self.assertEqual(result, "Fichier créé ou modifié : main.py")
+        self.assertEqual(len(agent.calls), 1)
+        self.assertTrue(agent.calls[0][1]["defer_file_actions"])
+        self.assertEqual(agent.applied[0][1], {"file", "write", "edit", "command"})
 
 
 if __name__ == "__main__":

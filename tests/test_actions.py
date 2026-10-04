@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT))
 import application_launcher
 import file_commands
 from local_ia.core.agent import LocalAgent
-from local_ia.tools import command, edit, listing, search, system
+from local_ia.tools import command, download as download_tool, edit, listing, search, system
 from local_ia.tools.file import normalize_path
 
 
@@ -56,6 +56,17 @@ class FastPathTest(ActionTestCase):
         launch.assert_called_once_with("firefox")
         ask.assert_not_called()
 
+    def test_first_person_app_launch_runs_without_calling_the_model(self):
+        app = {"name": "Firefox", "argv": ["firefox"]}
+        with patch.object(application_launcher, "find_application", return_value=app), \
+             patch.object(application_launcher, "launch_application", return_value=app) as launch, \
+             patch("local_ia.core.agent.ask_ollama") as ask:
+            answer = self.agent.respond({"messages": []}, "Je veux lancer Firefox")
+
+        self.assertEqual(answer, "Firefox lancé.")
+        launch.assert_called_once_with("Firefox")
+        ask.assert_not_called()
+
     def test_unknown_application_falls_back_to_the_model(self):
         with patch.object(application_launcher, "find_application", return_value=None), \
              self.ask("Je ne trouve pas cette application.") as ask:
@@ -70,6 +81,191 @@ class FastPathTest(ActionTestCase):
 
 
 class LocalCodeAgentTest(ActionTestCase):
+    def test_deferred_single_file_retries_prose_as_a_write_call(self):
+        target = self.tmp / "notes.py"
+        responses = iter([
+            '{"steps":["Créer le fichier Python demandé"]}',
+            "Je vais préparer le fichier.",
+            tool("write", path=str(target), content="print('bonjour')\n"),
+        ])
+        used_keys = []
+
+        def fake_ask(_messages, api_key=None, **_kwargs):
+            used_keys.append(api_key)
+            return next(responses)
+
+        chat = {"messages": []}
+        with patch.dict(
+            "os.environ",
+            {"LOCAL_IA_OPENROUTER_KEYS": '["key-one","key-two"]'},
+            clear=False,
+        ), patch("local_ia.core.agent.ask_ollama", side_effect=fake_ask):
+            proposal = self.agent.respond(
+                chat,
+                "Crée un fichier Python",
+                allowed_tools={"file", "list", "search", "write", "edit"},
+                local_code=True,
+                defer_file_actions=True,
+            )
+
+        self.assertEqual(used_keys, ["key-one", "key-two", "key-two"])
+        command = LocalAgent.parse_tool_call(proposal)
+        self.assertEqual(command["tool"], "write")
+        self.assertFalse(target.exists())
+        self.agent.apply_approved_file_call(proposal, chat, allowed_tools={"write"})
+        self.assertEqual(target.read_text(encoding="utf-8"), "print('bonjour')\n")
+
+    def test_code_subtasks_are_assigned_to_distinct_keys_and_wait_for_approval(self):
+        responses = iter([
+            '{"steps":["Créer la page HTML", "Créer la feuille de style"]}',
+            tool("write", path=str(self.tmp / "index.html"), content="<h1>Accueil</h1>\n"),
+            tool("write", path=str(self.tmp / "style.css"), content="body { color: black; }\n"),
+        ])
+        used_keys = []
+
+        def fake_ask(_messages, api_key=None, **_kwargs):
+            used_keys.append(api_key)
+            return next(responses)
+
+        chat = {"messages": []}
+        with patch.dict(
+            "os.environ",
+            {"LOCAL_IA_OPENROUTER_KEYS": '["key-one","key-two"]'},
+            clear=False,
+        ), patch("local_ia.core.agent.ask_ollama", side_effect=fake_ask):
+            proposal = self.agent.respond(
+                chat,
+                "Crée un site web avec une page d'accueil et une feuille de style",
+                allowed_tools={"file", "list", "search", "write", "edit"},
+                local_code=True,
+                defer_file_actions=True,
+            )
+
+        commands = LocalAgent.parse_file_command_plan(proposal)
+        self.assertEqual(used_keys, ["key-one", "key-two", "key-one"])
+        self.assertEqual(len(commands), 2)
+        self.assertFalse((self.tmp / "index.html").exists())
+        self.assertFalse((self.tmp / "style.css").exists())
+
+        result = self.agent.apply_approved_file_call(proposal, chat, allowed_tools={"write"})
+        self.assertIn("index.html", result)
+        self.assertIn("style.css", result)
+        self.assertTrue((self.tmp / "index.html").is_file())
+        self.assertTrue((self.tmp / "style.css").is_file())
+
+    def test_failed_code_subtask_restarts_without_losing_completed_steps(self):
+        html_path = self.tmp / "index.html"
+        css_path = self.tmp / "style.css"
+        responses = iter([
+            '{"steps":["Créer la page HTML", "Créer la feuille de style"]}',
+            tool("write", path=str(html_path), content="<h1>Accueil</h1>\n"),
+            "Je vais créer le CSS.",
+            tool("write", path=str(css_path), content="body { color: #222; }\n"),
+        ])
+        used_keys = []
+
+        def fake_ask(_messages, api_key=None, **_kwargs):
+            used_keys.append(api_key)
+            return next(responses)
+
+        chat = {"messages": []}
+        with patch.dict(
+            "os.environ",
+            {"LOCAL_IA_OPENROUTER_KEYS": '["key-one","key-two"]'},
+            clear=False,
+        ), patch("local_ia.core.agent.ask_ollama", side_effect=fake_ask), \
+             patch("local_ia.core.agent.MAX_TOOL_STEPS", 1):
+            proposal = self.agent.respond(
+                chat,
+                "Crée un site simple avec HTML et CSS",
+                allowed_tools={"file", "list", "search", "write", "edit"},
+                local_code=True,
+                defer_file_actions=True,
+            )
+
+        commands = LocalAgent.parse_file_command_plan(proposal)
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(used_keys, ["key-one", "key-two", "key-one", "key-two"])
+        self.assertFalse(html_path.exists())
+        self.assertFalse(css_path.exists())
+        self.agent.apply_approved_file_call(proposal, chat, allowed_tools={"write"})
+        self.assertTrue(html_path.is_file())
+        self.assertEqual(css_path.read_text(encoding="utf-8"), "body { color: #222; }\n")
+
+    def test_deferred_file_command_does_not_write_until_approved(self):
+        target = self.tmp / "approved.py"
+        chat = {"messages": []}
+        proposal = tool("write", path=str(target), content="print('approved')\n")
+        with self.ask(proposal) as ask:
+            command = self.agent.respond(
+                chat,
+                "Crée un script Python",
+                allowed_tools={"file", "write", "edit"},
+                local_code=True,
+                defer_file_actions=True,
+            )
+
+        self.assertEqual(ask.call_count, 1)
+        self.assertEqual(LocalAgent.parse_tool_call(command), LocalAgent.parse_tool_call(proposal))
+        self.assertFalse(target.exists())
+        result = self.agent.apply_approved_file_call(command, chat, allowed_tools={"write"})
+        self.assertIn("Fichier créé ou modifié", result)
+        self.assertEqual(target.read_text(encoding="utf-8"), "print('approved')\n")
+
+    def test_deferred_file_command_respects_disabled_write_permission(self):
+        target = self.tmp / "forbidden.py"
+        with self.ask(tool("write", path=str(target), content="print('no')\n")):
+            answer = self.agent.respond(
+                {"messages": []},
+                "Crée un script Python",
+                allowed_tools={"file"},
+                local_code=True,
+                defer_file_actions=True,
+            )
+
+        self.assertIn("écriture de fichiers est désactivée", answer)
+        self.assertFalse(target.exists())
+
+    def test_python_script_response_creates_a_download_artifact(self):
+        answer = "```python\ndef calculatrice():\n    return 2 + 2\n```"
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(download_tool, "CACHE_DIR", Path(directory)), \
+             patch.object(download_tool, "GENERATED_FILES_DIR", Path(directory) / "generated"), \
+             self.ask(answer, answer) as ask:
+            response = self.agent.respond(
+                {"messages": []},
+                "crée un script python de calculatrice",
+            )
+
+            self.assertEqual(ask.call_count, 2)
+            self.assertEqual(response, answer)
+            self.assertEqual(len(self.agent.generated_downloads), 1)
+            artifact = self.agent.generated_downloads[0]
+            self.assertEqual(artifact["filename"], "calculatrice.py")
+            cached_file = download_tool.resolve_cached_file(artifact["artifact_id"], artifact["filename"])
+            self.assertEqual(cached_file.read_text(encoding="utf-8"), "def calculatrice():\n    return 2 + 2\n")
+            persistent_file = download_tool.GENERATED_FILES_DIR / "calculatrice.py"
+            self.assertEqual(persistent_file.read_text(encoding="utf-8"), cached_file.read_text(encoding="utf-8"))
+
+    def test_download_tool_creates_verified_cache_artifact(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            download_tool, "CACHE_DIR", Path(directory)
+        ), patch.object(download_tool, "GENERATED_FILES_DIR", Path(directory) / "generated"), self.ask(
+            tool("create_download", filename="rapport", content="Résultat\n", extension="txt")
+        ) as ask:
+            answer = self.agent.respond(
+                {"messages": []},
+                "Crée un fichier texte à télécharger",
+                allowed_tools={"create_download"},
+            )
+
+            self.assertEqual(ask.call_count, 1)
+            self.assertEqual(answer, "Fichier prêt à télécharger : rapport.txt")
+            self.assertEqual(len(self.agent.generated_downloads), 1)
+            artifact = self.agent.generated_downloads[0]
+            cached_file = download_tool.resolve_cached_file(artifact["artifact_id"], artifact["filename"])
+            self.assertEqual(cached_file.read_text(encoding="utf-8"), "Résultat\n")
+
     def test_local_code_creates_script_from_markdown_wrapped_tool_call(self):
         script_path = self.tmp / "demonstration.py"
         tool_call = tool(
@@ -108,6 +304,25 @@ class LocalCodeAgentTest(ActionTestCase):
         self.assertTrue(all(call.kwargs["max_tokens"] == 4096 for call in ask.call_args_list))
         self.assertEqual(created_file.read_text(encoding="utf-8"), "<h1>dashboard</h1>")
         self.assertEqual(answer, "Le fichier est relu et le projet est terminé.")
+
+    def test_natural_code_request_creates_a_file(self):
+        script_path = self.tmp / "trier_liste.py"
+        progress = []
+        with self.ask(
+            tool("write", path=str(script_path), content="def trier(valeurs):\n    return sorted(valeurs)\n")
+        ) as ask:
+            answer = self.agent.respond(
+                {"messages": []},
+                "Écris un script Python qui trie une liste",
+                progress_callback=progress.append,
+            )
+
+        self.assertEqual(self.agent.last_route["mode"], "code")
+        self.assertTrue(script_path.is_file())
+        self.assertIn("trier_liste.py", answer)
+        self.assertEqual(ask.call_count, 1)
+        self.assertTrue(any("Étape 1/8" in item for item in progress))
+        self.assertIn("Action terminée; résultat vérifié.", progress)
 
     def test_explicit_application_path_is_saved_and_reusable_by_name(self):
         application_path = self.tmp / "ZapZap App"
@@ -270,6 +485,102 @@ class ToolLoopTest(ActionTestCase):
         self.assertNotIn("file :", system_prompt)
         self.assertNotIn("command :", system_prompt)
         self.assertNotIn("system :", system_prompt)
+        self.assertIn("sans répétition", system_prompt)
+
+    def test_multiple_keys_split_chat_into_minimal_steps_and_verify_globally(self):
+        responses = iter([
+            '{"steps":["Expliquer la capitale", "Donner un fait utile"]}',
+            "Rome est la capitale de l'Italie.",
+            "Elle est située dans la région du Latium.",
+            '{"correct":true,"issues":[]}',
+        ])
+        used_keys = []
+
+        def fake_ask(_messages, api_key=None, **_kwargs):
+            used_keys.append(api_key)
+            return next(responses)
+
+        progress = []
+        with patch.dict(
+            "os.environ",
+            {"LOCAL_IA_OPENROUTER_KEYS": '["key-one","key-two"]'},
+            clear=False,
+        ), patch("local_ia.core.agent.ask_ollama", side_effect=fake_ask):
+            answer = self.agent.respond(
+                {"messages": []},
+                "Quelle est la capitale de l'Italie et quel fait utile puis-je retenir ?",
+                progress_callback=progress.append,
+            )
+
+        self.assertIn("Rome est la capitale", answer)
+        self.assertIn("région du Latium", answer)
+        self.assertEqual(used_keys, ["key-one", "key-two", "key-one", "key-two"])
+        self.assertIn("Vérification globale de la réponse…", progress)
+        self.assertIn("Réponse vérifiée globalement.", progress)
+
+    def test_global_verifier_triggers_one_repair_phase_and_rechecks(self):
+        responses = iter([
+            '{"steps":["Répondre à la question"]}',
+            "La capitale est Roma.",
+            '{"correct":false,"issues":["Nom de ville non francisé"]}',
+            "La capitale est Rome.",
+            '{"correct":true,"issues":[]}',
+        ])
+        used_keys = []
+
+        def fake_ask(_messages, api_key=None, **_kwargs):
+            used_keys.append(api_key)
+            return next(responses)
+
+        with patch.dict(
+            "os.environ",
+            {"LOCAL_IA_OPENROUTER_KEYS": '["key-one","key-two"]'},
+            clear=False,
+        ), patch("local_ia.core.agent.ask_ollama", side_effect=fake_ask):
+            answer = self.agent.respond({"messages": []}, "Quelle est la capitale de l'Italie ?")
+
+        self.assertEqual(answer, "La capitale est Rome.")
+        self.assertEqual(used_keys, ["key-one", "key-two", "key-one", "key-two", "key-one"])
+
+    def test_tool_steps_use_keys_in_order_and_verify_final_answer(self):
+        responses = iter([
+            '{"steps":["Lister le contenu du dossier"]}',
+            tool("list", path=str(self.tmp)),
+            "Le dossier contient les fichiers du projet.",
+            '{"correct":true,"issues":[]}',
+        ])
+        used_keys = []
+
+        def fake_ask(_messages, api_key=None, **_kwargs):
+            used_keys.append(api_key)
+            return next(responses)
+
+        with patch.dict(
+            "os.environ",
+            {"LOCAL_IA_OPENROUTER_KEYS": '["key-one","key-two"]'},
+            clear=False,
+        ), patch("local_ia.core.agent.ask_ollama", side_effect=fake_ask), patch.object(
+            self.agent, "execute_tool", return_value={"entries": ["README.md"]}
+        ) as execute:
+            answer = self.agent.respond({"messages": []}, "Liste le dossier")
+
+        self.assertEqual(answer, "Le dossier contient les fichiers du projet.")
+        self.assertEqual(used_keys, ["key-one", "key-two", "key-one", "key-two"])
+        execute.assert_called_once()
+
+    def test_command_suggestion_returns_copyable_argv_without_execution(self):
+        response = tool("command", argv=["flatpak", "install", "flathub", "org.mozilla.firefox"])
+        with self.ask(response), patch.object(self.agent, "execute_tool") as execute:
+            answer = self.agent.respond(
+                {"messages": []},
+                "Quelle commande pour installer Firefox ?",
+            )
+
+        self.assertEqual(
+            answer,
+            "Commande à copier :\n```sh\nflatpak install flathub org.mozilla.firefox\n```",
+        )
+        execute.assert_not_called()
 
     def test_code_request_gets_filesystem_tools_without_system_tools(self):
         allowed = {"file", "write", "edit", "list", "search", "command"}
@@ -385,8 +696,26 @@ class ToolLoopTest(ActionTestCase):
         call = tool("list", path=str(self.tmp))
         with self.ask(call, call, call, call) as ask:
             answer = self.agent.respond({"messages": []}, "liste le dossier")
-        self.assertEqual(answer, "Action list exécutée.")
+        self.assertEqual(
+            answer,
+            "J'ai arrêté l'action list après une répétition pour éviter de tourner en rond.",
+        )
         self.assertEqual(ask.call_count, 2)
+
+    def test_tool_step_limit_does_not_claim_request_is_complete(self):
+        calls = [
+            tool("list", path=str(self.tmp / f"directory-{index}"))
+            for index in range(4)
+        ]
+        with self.ask(*calls) as ask, patch.object(
+            self.agent, "execute_tool", return_value={"entries": []}
+        ) as execute:
+            answer = self.agent.respond({"messages": []}, "liste le dossier")
+
+        self.assertIn("arrêté après 3 actions", answer)
+        self.assertIn("pas confirmée comme terminée", answer)
+        self.assertEqual(execute.call_count, 3)
+        self.assertEqual(ask.call_count, 4)
 
     def test_missing_argument_gives_a_readable_error(self):
         with self.assertRaisesRegex(ValueError, "old"):
@@ -401,6 +730,20 @@ class ToolLoopTest(ActionTestCase):
 
 
 class ConfirmationTest(ActionTestCase):
+    def test_application_installation_uses_catalog_action_and_requests_confirmation(self):
+        confirmation = {
+            "confirmation_required": True,
+            "message": "Confirme l'installation de Firefox.",
+        }
+        with self.ask(tool("system", action="install_app", value="Firefox")) as ask, patch(
+            "local_ia.core.tool_manager.system.use", return_value=confirmation
+        ) as install:
+            answer = self.agent.respond({"messages": []}, "Installe Firefox")
+
+        self.assertIn("Confirme l'installation", answer)
+        install.assert_called_once_with("install_app", "Firefox", 5, False)
+        self.assertIn("install_app|install|update", ask.call_args.args[0][0]["content"])
+
     def test_risky_command_needs_confirmation_then_runs(self):
         chat = {"messages": []}
         with self.ask(tool("command", argv=["rm", "-rf", str(self.tmp / "x")])) as ask:

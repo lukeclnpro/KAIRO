@@ -54,6 +54,13 @@ class RequestRouterTest(unittest.TestCase):
                 self.assertEqual(route["mode"], "tool")
                 self.assertEqual(route["tools"], ("calculator",))
 
+    def test_document_and_table_requests_are_routed_to_document_tool(self):
+        for request in ("Analyse ce fichier CSV", "Lis ce PDF", "crée un tableau XLSX"):
+            with self.subTest(request=request):
+                route = self.router.route(request, lambda *_: None)
+                self.assertEqual(route["action"], "document")
+                self.assertEqual(route["tools"], ("document",))
+
     def test_web_search_categories_are_routed_to_web_tool(self):
         for message in (
             "annonces vélo à Metz",
@@ -71,10 +78,124 @@ class RequestRouterTest(unittest.TestCase):
         self.assertIn("edit", route["tools"])
         self.assertIn("search", route["tools"])
 
+    def test_contextual_code_followup_targets_the_existing_file(self):
+        route = self.router.route(
+            "ajoute dedans l'installation auto des dependances",
+            lambda *_: None,
+            existing_code_file="/tmp/liste_appareils_reseau.py",
+        )
+
+        self.assertEqual(route["mode"], "tool")
+        self.assertEqual(route["action"], "filesystem")
+        self.assertEqual(route["existing_code_file"], "/tmp/liste_appareils_reseau.py")
+        self.assertEqual(set(route["tools"]), {"edit", "file", "search", "write"})
+
+    def test_contextual_code_followup_without_an_existing_file_is_not_forced(self):
+        route = self.router.route("ajoute dedans l'installation auto des dependances", lambda *_: None)
+
+        self.assertEqual(route["mode"], "agent")
+
+    def test_agent_finds_the_latest_existing_file_reported_in_chat(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "liste_appareils_reseau.py"
+            target.write_text("print('old')\n", encoding="utf-8")
+            chat = {
+                "messages": [
+                    {"role": "assistant", "content": f"Fichier créé ou modifié : {target}"},
+                    {"role": "assistant", "content": "Autre réponse sans fichier."},
+                ]
+            }
+
+            self.assertEqual(LocalAgent._recent_created_file(chat), str(target.resolve()))
+
+    def test_agent_ignores_missing_file_reported_in_chat(self):
+        chat = {
+            "messages": [
+                {"role": "assistant", "content": "Fichier créé ou modifié : /tmp/no-such-file-kairo.py"},
+            ]
+        }
+
+        self.assertIsNone(LocalAgent._recent_created_file(chat))
+
+    def test_filesystem_followup_prompt_requires_editing_existing_file(self):
+        prompt = ContextCompiler().compile(
+            {"messages": []},
+            {"langue": "français", "role": "assistant local"},
+            [],
+            message="ajoute dedans l'installation auto des dependances",
+            route={
+                "mode": "tool",
+                "action": "filesystem",
+                "tools": ("edit", "file", "search", "write"),
+                "existing_code_file": "/tmp/liste_appareils_reseau.py",
+            },
+            allow_tools={"edit", "file", "search", "write"},
+        )
+
+        self.assertIn("au lieu de créer un nouveau fichier", prompt)
+        self.assertIn("/tmp/liste_appareils_reseau.py", prompt)
+
+    def test_plural_folder_request_is_routed_to_filesystem_tools(self):
+        route = self.router.route("Liste les dossiers", lambda *_: None)
+
+        self.assertEqual(route["mode"], "tool")
+        self.assertIn("list", route["tools"])
+
     def test_explicit_command_is_routed_to_tool_mode(self):
         route = self.router.route("/commande echo ok", lambda *_: None)
         self.assertEqual(route["mode"], "tool")
         self.assertEqual(route["tools"], ("command",))
+
+    def test_command_suggestion_is_routed_without_execution_tools(self):
+        route = self.router.route("Quelle commande pour lancer Firefox ?", lambda *_: None)
+
+        self.assertEqual(route["mode"], "command_suggestion")
+        self.assertEqual(route["action"], "command_suggestion")
+        self.assertEqual(route["tools"], ())
+
+    def test_code_request_is_routed_to_file_creation(self):
+        for message in (
+            "Écris un script Python qui trie une liste",
+            "Je demande du code pour vérifier une adresse email",
+        ):
+            with self.subTest(message=message):
+                route = self.router.route(message, lambda *_: None)
+                self.assertEqual(route["mode"], "code")
+                self.assertEqual(route["action"], "code_artifact")
+                self.assertIn("write", route["tools"])
+                self.assertNotIn("launch", route["tools"])
+            calculator_script = self.router.route("crée un script python de calculatrice", lambda *_: None)
+            self.assertEqual(calculator_script["action"], "code_artifact")
+            self.assertIn("write", calculator_script["tools"])
+            self.assertNotIn("create_download", calculator_script["tools"])
+
+    def test_generic_file_creation_uses_the_file_command_route(self):
+        route = self.router.route("Crée un fichier de configuration", lambda *_: None)
+
+        self.assertEqual(route["mode"], "code")
+        self.assertEqual(route["action"], "code_artifact")
+        self.assertEqual(set(route["tools"]), {"file", "write", "edit", "list", "search"})
+
+    def test_downloadable_file_request_is_routed_to_download_tool(self):
+        route = self.router.route("Crée un fichier texte à télécharger", lambda *_: None)
+
+        self.assertEqual(route["mode"], "tool")
+        self.assertIn("create_download", route["tools"])
+
+    def test_download_request_keeps_download_route_before_generic_file_creation(self):
+        route = self.router.route("Crée un fichier texte à télécharger", lambda *_: None)
+
+        self.assertEqual(route["action"], "download")
+        self.assertEqual(route["tools"], ("create_download",))
+
+    def test_application_installation_uses_system_tool(self):
+        route = self.router.route("Installe Firefox", lambda *_: None)
+
+        self.assertEqual(route["mode"], "tool")
+        self.assertEqual(route["action"], "install_application")
+        self.assertEqual(route["tools"], ("system",))
 
     def test_mixed_filesystem_and_system_request_keeps_both_tool_groups(self):
         route = self.router.route("Crée un fichier avec mon OS", lambda *_: None)
@@ -107,6 +228,14 @@ class ContextCompilerTest(unittest.TestCase):
         self.assertNotIn("command :", prompt)
         self.assertNotIn("system :", prompt)
 
+    def test_document_tool_prompt_explains_safe_actions(self):
+        prompt = ToolManager.build_prompt({"document"})
+
+        self.assertIn("sqlite_query", prompt)
+        self.assertIn("SELECT/WITH", prompt)
+        self.assertIn("create_archive", prompt)
+        self.assertIn("confirmation utilisateur", prompt)
+
     def test_tool_manager_executes_calculator(self):
         result = ToolManager.execute(
             {"tool": "calculator", "arguments": {"expression": "sqrt(81) + 12 * 3"}},
@@ -127,7 +256,7 @@ class ContextCompilerTest(unittest.TestCase):
         route = {"mode": "agent", "tools": None}
         self.assertEqual(
             ToolManager.get_tools(route),
-            {"memory", "context", "file", "write", "edit", "list", "search", "launch", "command", "system", "web", "open_page", "calculator"},
+            {"memory", "context", "file", "write", "edit", "list", "search", "launch", "command", "system", "web", "open_page", "calculator", "create_download", "document"},
         )
 
     def test_validate_refuses_tools_outside_allowlist(self):
@@ -167,6 +296,7 @@ class ContextCompilerTest(unittest.TestCase):
 
     def test_tool_step_limits_are_route_aware(self):
         self.assertEqual(LocalAgent.get_max_tool_steps({"mode": "tool"}), 3)
+        self.assertEqual(LocalAgent.get_max_tool_steps({"mode": "code"}), 8)
         self.assertEqual(LocalAgent.get_max_tool_steps({"mode": "agent"}), 4)
         self.assertEqual(LocalAgent.get_max_tool_steps({"mode": "chat"}), 0)
 
@@ -195,6 +325,24 @@ class ContextCompilerTest(unittest.TestCase):
         self.assertIsNot(first, second)
         self.assertIn("anglais", second[0])
 
+    def test_prompt_cache_tracks_the_current_request(self):
+        agent = LocalAgent.__new__(LocalAgent)
+        agent.model = "dummy"
+        agent.context = {"langue": "français", "role": "assistant local"}
+        agent.memories = []
+        agent.context_compiler = ContextCompiler()
+        agent._prepared_prompts = {}
+        agent._tool_cache = {}
+        route = {"mode": "code", "action": "code_artifact", "tools": ("write", "edit")}
+        chat = {"id": 11, "topic": "tests", "messages": []}
+
+        first = agent.prepare_chat(chat, message="Crée un fichier alpha.py", route=route, tools=("write", "edit"))
+        second = agent.prepare_chat(chat, message="Crée un fichier beta.py", route=route, tools=("write", "edit"))
+
+        self.assertIsNot(first, second)
+        self.assertIn("alpha.py", first[0])
+        self.assertIn("beta.py", second[0])
+
     def test_compile_simple_question_uses_only_base_prompt(self):
         compiler = ContextCompiler()
         messages = [
@@ -215,6 +363,34 @@ class ContextCompilerTest(unittest.TestCase):
         self.assertNotIn("Je travaille en Python", prompt)
         self.assertNotIn("file :", prompt)
         self.assertNotIn("command :", prompt)
+
+    def test_command_suggestion_prompt_forbids_execution(self):
+        prompt = ContextCompiler().compile(
+            {"messages": []},
+            {"langue": "français", "role": "assistant local"},
+            [],
+            message="Quelle commande pour lancer Firefox ?",
+            route={"mode": "command_suggestion", "action": "command_suggestion", "tools": ()},
+            allow_tools=set(),
+        )
+
+        self.assertIn("commande exacte dans un bloc de code", prompt)
+        self.assertIn("pas son exécution", prompt)
+        self.assertNotIn("command :", prompt)
+
+    def test_code_prompt_requires_a_file_artifact(self):
+        prompt = ContextCompiler().compile(
+            {"messages": []},
+            {"langue": "français", "role": "assistant local"},
+            [],
+            message="Écris un script Python",
+            route={"mode": "code", "action": "code_artifact", "tools": ("write",)},
+            allow_tools={"write"},
+        )
+
+        self.assertIn("uniquement un appel <tool_call>", prompt)
+        self.assertIn("write ou edit", prompt)
+        self.assertIn("nom descriptif", prompt)
 
     def test_compile_code_request_keeps_history_and_file_tools_but_not_launch(self):
         compiler = ContextCompiler()

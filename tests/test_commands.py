@@ -222,6 +222,63 @@ class CommandTest(unittest.TestCase):
         result = system.use("install", "example-package")
         self.assertTrue(result["confirmation_required"])
 
+    def test_catalog_application_installation_requires_confirmation(self):
+        application = {"id": "firefox", "name": "Mozilla Firefox"}
+        plan = {
+            "manager": "apt",
+            "command": ["sudo", "apt", "install", "firefox"],
+        }
+        with patch.object(system.program_commands, "find_catalog_program", return_value=application), \
+             patch.object(system.program_commands, "get_installation_plan", return_value=plan):
+            result = system.use("install", "Firefox")
+
+        self.assertTrue(result["confirmation_required"])
+        self.assertEqual(
+            result["command"],
+            ["sudo", "-n", "apt", "install", "--assume-yes", "firefox"],
+        )
+        self.assertIn("Mozilla Firefox", result["message"])
+
+    def test_catalog_application_installation_runs_only_after_confirmation(self):
+        application = {"id": "firefox", "name": "Mozilla Firefox"}
+        plan = {
+            "manager": "apt",
+            "command": ["sudo", "apt", "install", "firefox"],
+        }
+        with patch.object(system.program_commands, "find_catalog_program", return_value=application), \
+             patch.object(system.program_commands, "get_installation_plan", return_value=plan), \
+             patch.object(system, "_run", return_value={"command": [], "returncode": 0, "stdout": "", "stderr": ""}) as run:
+            result = system.use("install", "Firefox", confirmed=True)
+
+        run.assert_called_once_with(
+            ["sudo", "-n", "apt", "install", "--assume-yes", "firefox"]
+        )
+        self.assertEqual(result["application"], "Mozilla Firefox")
+
+    def test_install_app_is_restricted_to_catalog_entries(self):
+        with patch.object(system.program_commands, "find_catalog_program", return_value=None), \
+             patch.object(system, "_confirmation") as generic_confirmation:
+            with self.assertRaisesRegex(ValueError, "absente du catalogue"):
+                system.use("install_app", "unknown-app", confirmed=True)
+
+        generic_confirmation.assert_not_called()
+
+    def test_install_app_waits_for_confirmation_before_running(self):
+        application = {"id": "firefox", "name": "Mozilla Firefox"}
+        plan = {
+            "manager": "flatpak",
+            "command": ["flatpak", "install", "--user", "flathub", "org.mozilla.firefox"],
+            "requires": ["remote Flathub configuré"],
+        }
+        with patch.object(system.program_commands, "find_catalog_program", return_value=application), \
+             patch.object(system.program_commands, "get_installation_plan", return_value=plan), \
+             patch.object(system, "_run") as run:
+            pending = system.use("install_app", "Firefox")
+
+        self.assertTrue(pending["confirmation_required"])
+        self.assertIn("remote Flathub configuré", pending["message"])
+        run.assert_not_called()
+
     def test_system_info_is_available(self):
         result = system.use("info")
         self.assertIn("system", result)
