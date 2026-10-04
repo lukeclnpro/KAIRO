@@ -1,0 +1,13 @@
+JAVASCRIPT — FICHE DE RÉFÉRENCE
+
+Déclarer avec const par défaut, let si la variable est réassignée; éviter var. Types usuels : string, number, boolean, null, undefined, array, object. Utiliser === et vérifier les valeurs nulles.
+
+Fonction : const additionner = (a, b) => a + b;. Garder les fonctions courtes et nommées selon leur action. Les tableaux offrent map (transformer), filter (sélectionner), find (premier résultat).
+
+Asynchrone : async function retourne une Promise; await attend son résultat. Encadrer les opérations réseau par try/catch, vérifier response.ok avant response.json(). Ne pas bloquer inutilement le fil principal.
+
+DOM : sélectionner avec querySelector; écouter les actions avec addEventListener. Créer du texte non fiable via textContent, pas innerHTML. Vérifier qu'un élément existe avant de le modifier.
+
+Modules : exporter les fonctions réutilisables et importer explicitement leurs dépendances. Dans le navigateur, déclarer type="module"; côté Node, suivre le type de module défini par package.json.
+
+Qualité : gérer les entrées invalides, éviter les variables globales, séparer logique et affichage, tester le parcours nominal et les erreurs.

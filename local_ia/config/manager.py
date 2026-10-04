@@ -5,10 +5,14 @@ from __future__ import annotations
 import copy
 import json
 import os
+import threading
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 CONFIG_PATH = BASE_DIR / "config.json"
+_KEY_ROTATION_LOCK = threading.Lock()
+_KEY_ROTATION_KEYS = ()
+_KEY_ROTATION_INDEX = 0
 
 DEFAULT_CONFIG = {
     "model": "qwen2.5:1.5b",
@@ -20,7 +24,6 @@ DEFAULT_CONFIG = {
         "keep_alive": "30m",
     },
     "openrouter": {
-        "api_key": "",
         "model": "openai/gpt-4o-mini",
         "base_url": "https://openrouter.ai/api/v1",
         "timeout": 120,
@@ -74,14 +77,41 @@ def ollama_base_url(config: dict | None = None) -> str:
     return url[:-4] if url.endswith("/api") else url
 
 
-def openrouter_api_key(config: dict | None = None) -> str:
+def openrouter_api_keys() -> list[str]:
+    serialized_keys = os.environ.get("LOCAL_IA_OPENROUTER_KEYS", "").strip()
+    if serialized_keys:
+        try:
+            values = json.loads(serialized_keys)
+        except json.JSONDecodeError:
+            values = []
+        if isinstance(values, list):
+            keys = list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
+            if keys:
+                return keys
+
     env_key = os.environ.get("LOCAL_IA_OPENROUTER_KEY") or os.environ.get("OPENROUTER_API_KEY")
     if env_key and str(env_key).strip():
-        return str(env_key).strip()
+        return [str(env_key).strip()]
+    return []
 
-    data = config if config is not None else load_config()
-    nested = data.get("openrouter", {})
-    return str(nested.get("api_key", "") if isinstance(nested, dict) else "").strip()
+
+def openrouter_api_key(config: dict | None = None, *, rotate: bool = False) -> str:
+    global _KEY_ROTATION_KEYS, _KEY_ROTATION_INDEX
+
+    keys = openrouter_api_keys()
+    if not keys:
+        return ""
+    if not rotate or len(keys) == 1:
+        return keys[0]
+
+    signature = tuple(keys)
+    with _KEY_ROTATION_LOCK:
+        if signature != _KEY_ROTATION_KEYS:
+            _KEY_ROTATION_KEYS = signature
+            _KEY_ROTATION_INDEX = 0
+        selected = keys[_KEY_ROTATION_INDEX % len(keys)]
+        _KEY_ROTATION_INDEX += 1
+        return selected
 
 
 def openrouter_model(config: dict | None = None) -> str:

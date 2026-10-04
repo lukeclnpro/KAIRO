@@ -16,7 +16,7 @@ def get_main_menu_options(provider):
         ])
     options.extend([
         ("5", "Modifier la configuration de l'IA"),
-        ("6", "Lancer sur le serveur"),
+        ("6", "Installer une application"),
         ("7", "Mettre à jour le programme"),
         ("8", "Voir les nouveautés"),
         ("9", "Ouvrir les projets de code"),
@@ -79,7 +79,7 @@ def show_help():
     print("    3 - Installer un modèle")
     print("    4 - Désinstaller un modèle")
     print("    5 - Modifier la configuration de l'IA")
-    print("    6 - Lancer le serveur")
+    print("    6 - Installer une application depuis le catalogue")
     print("    7 - Mettre à jour le programme")
     print("    8 - Voir les nouveautés")
     print("    0 - Quitter")

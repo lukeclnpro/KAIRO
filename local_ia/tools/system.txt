@@ -8,7 +8,8 @@ up ou increase : augmenter le volume.
 down ou decrease : diminuer le volume.
 mute : couper le son.
 unmute : rétablir le son.
-install : préparer l'installation d'un paquet.
+install_app : installer une application présente dans program_catalog.json.
+install : préparer l'installation d'un paquet système.
 update : préparer la mise à jour du système.
 
 EXEMPLES
@@ -18,4 +19,4 @@ EXEMPLES
 
 SECURITE
 Les installations et mises à jour retournent d'abord confirmation_required.
-Elles ne sont exécutées qu'après une confirmation explicite de l'utilisateur.
+Une application doit correspondre au catalogue et n'est exécutée qu'après une confirmation explicite de l'utilisateur.

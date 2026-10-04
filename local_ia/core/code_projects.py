@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
+import tempfile
 import unicodedata
-from pathlib import Path
+import zipfile
+from pathlib import Path, PurePosixPath
 
 
 _PROJECT_NAME_RE = re.compile(r"[\w .()-]{1,64}", re.UNICODE)
 CODE_EXAMPLES_SOURCE = Path(__file__).resolve().parents[2] / "code" / "exemple"
+MAX_IMPORTED_PROJECT_BYTES = 512 * 1024 * 1024
 _WINDOWS_RESERVED_NAMES = {
     "CON", "PRN", "AUX", "NUL",
     *(f"COM{index}" for index in range(1, 10)),
@@ -116,6 +121,151 @@ def list_projects() -> list[Path]:
         (path for path in root.iterdir() if path.is_dir() and path.resolve().parent == root),
         key=lambda path: path.name.casefold(),
     )
+
+
+def _read_project_metadata(project: str | Path) -> tuple[Path, dict]:
+    project_root = resolve_active_project(project)
+    metadata_path = resolve_project_path(project_root, ".local_ia.json")
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        metadata = {}
+    return metadata_path, metadata if isinstance(metadata, dict) else {}
+
+
+def _write_project_metadata(metadata_path: Path, metadata: dict) -> None:
+    metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def get_project_category(project: str | Path) -> str:
+    _metadata_path, metadata = _read_project_metadata(project)
+    return str(metadata.get("category") or "").strip()
+
+
+def set_project_category(project: str | Path, category: str) -> None:
+    metadata_path, metadata = _read_project_metadata(project)
+    value = str(category or "").strip()
+    if value:
+        metadata["category"] = value
+    else:
+        metadata.pop("category", None)
+    _write_project_metadata(metadata_path, metadata)
+
+
+def get_project_disabled_tools(project: str | Path) -> set[str]:
+    _metadata_path, metadata = _read_project_metadata(project)
+    disabled = metadata.get("disabled_tools", [])
+    if not isinstance(disabled, list):
+        return set()
+    return {name for name in disabled if isinstance(name, str)}
+
+
+def set_project_disabled_tools(project: str | Path, disabled_tools) -> None:
+    metadata_path, metadata = _read_project_metadata(project)
+    disabled = sorted({str(name) for name in disabled_tools if isinstance(name, str)})
+    if disabled:
+        metadata["disabled_tools"] = disabled
+    else:
+        metadata.pop("disabled_tools", None)
+    _write_project_metadata(metadata_path, metadata)
+
+
+def list_project_tasks(project: str | Path) -> list[dict]:
+    _metadata_path, metadata = _read_project_metadata(project)
+    tasks = metadata.get("tasks", [])
+    if not isinstance(tasks, list):
+        return []
+    return [task for task in tasks if isinstance(task, dict)]
+
+
+def save_project_tasks(project: str | Path, tasks: list[dict]) -> None:
+    metadata_path, metadata = _read_project_metadata(project)
+    if not isinstance(tasks, list) or any(not isinstance(task, dict) for task in tasks):
+        raise ValueError("La liste des tâches est invalide.")
+    metadata["tasks"] = tasks
+    _write_project_metadata(metadata_path, metadata)
+
+
+def delete_project(project: str | Path) -> None:
+    shutil.rmtree(resolve_active_project(project))
+
+
+def export_project(project: str | Path, destination: str | Path) -> Path:
+    project_root = resolve_active_project(project)
+    target = Path(destination).expanduser()
+    if project_root in target.resolve().parents:
+        raise ValueError("L’archive doit être enregistrée en dehors du projet.")
+    with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(f"{project_root.name}/", "")
+        for path in sorted(project_root.rglob("*")):
+            if path.is_symlink():
+                continue
+            archive_name = PurePosixPath(project_root.name, *path.relative_to(project_root).parts).as_posix()
+            if path.is_dir():
+                archive.writestr(f"{archive_name}/", "")
+            elif path.is_file():
+                archive.write(path, archive_name)
+    return target
+
+
+def import_project(source: str | Path) -> Path:
+    source_path = Path(source).expanduser()
+    root = get_projects_root().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    try:
+        with zipfile.ZipFile(source_path, "r") as archive:
+            entries = []
+            top_level_names = set()
+            seen_paths = set()
+            total_size = 0
+            for info in archive.infolist():
+                raw_name = info.filename
+                if "\\" in raw_name or raw_name.startswith("/"):
+                    raise ValueError("L’archive contient un chemin invalide.")
+                raw_parts = raw_name.split("/")
+                if info.is_dir() and raw_parts[-1] == "":
+                    raw_parts.pop()
+                if not raw_parts or any(part in {"", ".", ".."} for part in raw_parts):
+                    raise ValueError("L’archive contient un chemin invalide.")
+                if any(any(character in part for character in '<>:"|?*') for part in raw_parts):
+                    raise ValueError("L’archive contient un nom de fichier invalide.")
+                if (info.external_attr >> 16) & 0o170000 == stat.S_IFLNK:
+                    raise ValueError("L’import de liens symboliques n’est pas autorisé.")
+                archive_path = "/".join(raw_parts).casefold()
+                if archive_path in seen_paths:
+                    raise ValueError("L’archive contient des chemins en double.")
+                seen_paths.add(archive_path)
+                top_level_names.add(raw_parts[0])
+                if len(raw_parts) > 1:
+                    total_size += info.file_size
+                    if total_size > MAX_IMPORTED_PROJECT_BYTES:
+                        raise ValueError("L’archive dépasse la taille maximale de 512 Mo.")
+                    entries.append((info, raw_parts[1:]))
+
+            if len(top_level_names) != 1:
+                raise ValueError("L’archive doit contenir un seul dossier de projet à sa racine.")
+            project_name = _validate_project_name(top_level_names.pop())
+            destination = root / project_name
+            if destination.exists():
+                raise FileExistsError(f"Un projet porte déjà ce nom : {project_name}")
+
+            with tempfile.TemporaryDirectory(prefix=".import-", dir=root) as temporary_directory:
+                staging = Path(temporary_directory) / project_name
+                staging.mkdir()
+                for info, relative_parts in entries:
+                    target = staging.joinpath(*relative_parts)
+                    if staging not in target.resolve().parents:
+                        raise ValueError("L’archive contient un chemin hors du projet.")
+                    if info.is_dir():
+                        target.mkdir(parents=True, exist_ok=True)
+                        continue
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with archive.open(info, "r") as archived_file, target.open("wb") as output_file:
+                        shutil.copyfileobj(archived_file, output_file)
+                staging.rename(destination)
+            return destination
+    except zipfile.BadZipFile as error:
+        raise ValueError("Le fichier sélectionné n’est pas une archive ZIP valide.") from error
 
 
 def resolve_active_project(path: str | Path) -> Path:

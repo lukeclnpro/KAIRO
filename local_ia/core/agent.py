@@ -13,19 +13,21 @@ from __future__ import annotations
 import json
 import logging
 import re
+import unicodedata
 from datetime import date
 from pathlib import Path
 
 import application_launcher
 import command_commands
-from local_ia.config.manager import model_config
+import program_commands
+from local_ia.config.manager import model_config, openrouter_api_keys
 from local_ia.core.context import load_context
 from local_ia.core.context_compiler import ContextCompiler
 from local_ia.core.conversation import get_weighted_chat_history
 from local_ia.core.memory import get_memories, init_database
 from local_ia.core.router import RequestRouter
 from local_ia.llm.ollama import ask_ollama
-from local_ia.tools import system
+from local_ia.tools import download as download_tool, system
 from local_ia.core.tool_manager import ToolManager
 
 TOOL_NAMES = set(ToolManager.ALL_TOOLS)
@@ -50,7 +52,16 @@ MAX_TOOL_STEPS = 4
 MAX_CHUNKED_WRITE_STEPS = 128
 MAX_TOOL_RESULT_CHARS = 2500
 LOCAL_CODE_MAX_RESPONSE_TOKENS = 4096
-MAX_TOOL_STEPS_BY_MODE = {"tool": 3, "agent": MAX_TOOL_STEPS, "local_code": 12, "chat": 0, "direct": 0}
+MAX_MULTI_KEY_STAGES = 8
+MAX_TOOL_STEPS_BY_MODE = {
+    "tool": 3,
+    "code": 8,
+    "agent": MAX_TOOL_STEPS,
+    "local_code": 12,
+    "chat": 0,
+    "command_suggestion": 0,
+    "direct": 0,
+}
 CONFIRMATIONS = {
     "oui", "yes", "ok", "d'accord", "d accord", "je confirme", "confirme", "confirmé",
     "oui je confirme", "vas-y", "go", "c'est bon",
@@ -58,6 +69,10 @@ CONFIRMATIONS = {
 # Mots qui montrent que l'utilisateur attend autre chose que l'action elle-même.
 FOLLOW_UP_RE = re.compile(
     r"\b(puis|ensuite|apr[eè]s|et dis|dis-moi|montre-moi|et montre|et affiche|then)\b", re.I
+)
+_CREATED_FILE_RE = re.compile(
+    r"^\s*Fichier\s+(?:créé\s+ou\s+modifié|créé|modifié)\s*:\s*(?P<path>.+?)\s*$",
+    re.I | re.M,
 )
 MULTI_PART_WRITE_RE = re.compile(
     r"\b(?:plusieurs|multiples|diff[ée]rents?)\s+(?:blocs?|parties|segments)\b", re.I
@@ -67,7 +82,7 @@ LARGE_FILE_REQUEST_RE = re.compile(
     re.I,
 )
 
-_POLITE = r"(?:(?:peux-tu|pourrais-tu|tu peux|s'il te pla[iî]t)\s+)*"
+_POLITE = r"(?:(?:peux-tu|pourrais-tu|tu peux|je veux|je voudrais|j'aimerais|s'il te pla[iî]t)\s+)*"
 _LAUNCH_RE = re.compile(
     _POLITE + r"(?:lance|lancer|ouvre|ouvrir|d[ée]marre|d[ée]marrer)\s+(?P<name>.+?)"
     r"\s*(?:s'il te pla[iî]t|stp)?[.!?]*$",
@@ -129,6 +144,23 @@ _VOLUME_RULES = (
     (re.compile(_POLITE + r"(?:remets? le son|r[ée]active le son|d[ée]sactive la sourdine|unmute)[.!]*$", re.I),
      "unmute", "Son rétabli."),
 )
+
+
+class RequestKeySequence:
+    def __init__(self, keys):
+        self.keys = tuple(str(key).strip() for key in keys if str(key).strip())
+        self.index = 0
+
+    def key_for_stage(self, stage):
+        if not self.keys:
+            return None
+        return self.keys[max(0, int(stage)) % len(self.keys)]
+
+    def next_key(self):
+        key = self.key_for_stage(self.index)
+        if self.keys:
+            self.index += 1
+        return key
 
 
 class LocalAgent:
@@ -195,6 +227,7 @@ class LocalAgent:
         self._prepared_prompts = {}
         self._tool_cache = {}
         self._context_cache = {}
+        self.generated_downloads = []
 
     def reload_context(self):
         self.context = load_context()
@@ -229,6 +262,7 @@ class LocalAgent:
         key = (
             chat.get("id"),
             chat.get("topic"),
+            str(message or "") if route.get("mode") in {"code", "local_code"} else None,
             tool_key,
             str(route).lower(),
             context_sig,
@@ -255,7 +289,8 @@ class LocalAgent:
         prompt = prompts[1 if include_tools else 0]
         if external_info:
             prompt += "\n\n" + str(external_info)
-        return [{"role": "system", "content": prompt}, *get_weighted_chat_history(chat), {"role": "user", "content": message}]
+        history = [] if route.get("mode") in {"code", "local_code"} else get_weighted_chat_history(chat)
+        return [{"role": "system", "content": prompt}, *history, {"role": "user", "content": message}]
 
     # ------------------------------------------------------------------
     # Voie rapide : aucune génération, l'action est faite tout de suite.
@@ -484,6 +519,419 @@ class LocalAgent:
         return {"role": "tool", "content": f"Résultat de l'outil {tool_name} :\n{text}"}
 
     @staticmethod
+    def _report_progress(progress_callback, message):
+        if progress_callback is None:
+            return
+        try:
+            progress_callback(str(message))
+        except Exception as error:
+            logging.getLogger(__name__).debug(
+                "Le retour de progression a échoué (%s)", type(error).__name__
+            )
+
+    def _ask_with_api_key(self, messages, api_key=None, max_tokens=None, stream=None):
+        options = {"model": self.model}
+        if max_tokens is not None:
+            options["max_tokens"] = max_tokens
+        if stream is not None:
+            options["stream"] = stream
+        if api_key:
+            options["api_key"] = api_key
+        return ask_ollama(list(messages), **options)
+
+    @staticmethod
+    def _parse_stage_plan(response, request, stage_limit):
+        text = str(response or "").strip()
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.I)
+        match = re.search(r"\{.*\}", text, re.S)
+        try:
+            payload = json.loads(match.group(0)) if match else {}
+        except json.JSONDecodeError:
+            payload = {}
+        steps = payload.get("steps") if isinstance(payload, dict) else None
+        if not isinstance(steps, list):
+            return [request]
+        normalized = [str(step).strip() for step in steps if isinstance(step, str) and step.strip()]
+        return normalized[:max(1, min(int(stage_limit), MAX_MULTI_KEY_STAGES))] or [request]
+
+    def _plan_tool_stages(self, message, messages, key_sequence, progress_callback=None):
+        if len(key_sequence.keys) <= 1:
+            return []
+        self._report_progress(progress_callback, "Découpage en étapes selon les clés disponibles…")
+        planner_messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Prépare un plan interne, sans exécuter d'outil et sans répondre à l'utilisateur. "
+                    "Découpe la demande en nombre MINIMAL d'étapes logiques, au maximum "
+                    f"{min(len(key_sequence.keys), MAX_MULTI_KEY_STAGES)}. "
+                    "Pour une modification de code, regroupe toutes les modifications d'un même fichier dans une étape "
+                    "et répartis les fichiers indépendants entre les étapes. "
+                    'Retourne uniquement un JSON: {"steps":["étape 1", "étape 2"]}. '
+                    "Si une seule étape suffit, n'en retourne qu'une."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps({"request": message}, ensure_ascii=False),
+            },
+        ]
+        plan = self._ask_with_api_key(
+            planner_messages,
+            api_key=key_sequence.next_key(),
+            max_tokens=1000,
+        )
+        steps = self._parse_stage_plan(plan, message, len(key_sequence.keys))
+        messages.append({
+            "role": "assistant",
+            "content": "Plan interne minimal : " + json.dumps(steps, ensure_ascii=False),
+        })
+        return steps
+
+    def _generate_deferred_file_commands(
+        self,
+        messages,
+        request,
+        steps,
+        chat,
+        allowed_tools,
+        key_sequence,
+        progress_callback=None,
+    ):
+        commands = []
+        target_paths = set()
+        for index, step_request in enumerate(steps):
+            key_index = (index + 1) % len(key_sequence.keys)
+            api_key = key_sequence.key_for_stage(index + 1)
+            self._report_progress(
+                progress_callback,
+                f"Sous-tâche {index + 1}/{len(steps)} attribuée à la clé {key_index + 1}/{len(key_sequence.keys)}…",
+            )
+            stage_messages = [dict(item) for item in messages]
+            stage_messages.insert(
+                len(stage_messages) - 1,
+                {
+                    "role": "system",
+                    "content": (
+                        f"SOUS-TÂCHE {index + 1}/{len(steps)} : {step_request}\n"
+                        "Cette tâche t'est attribuée indépendamment. Traite uniquement cette sous-tâche, "
+                        "en tenant compte des autres tâches prévues. Lis les fichiers nécessaires avec file/list/search. "
+                        "Termine par exactement un appel write ou edit, sans l'exécuter et sans texte autour. "
+                        "Les changements du même fichier doivent être regroupés dans une seule sous-tâche."
+                    ),
+                },
+            )
+            stage_messages[-1] = {
+                "role": "user",
+                "content": (
+                    f"Demande complète : {request}\n"
+                    f"Plan des sous-tâches : {json.dumps(steps, ensure_ascii=False)}\n"
+                    f"Sous-tâche attribuée : {step_request}\n"
+                    "Retourne une seule commande de création ou modification de fichier."
+                ),
+            }
+
+            initial_stage_messages = [dict(item) for item in stage_messages]
+            for attempt in range(MAX_TOOL_STEPS * 2):
+                if attempt == MAX_TOOL_STEPS:
+                    api_key = key_sequence.key_for_stage(index + 2)
+                    stage_messages = [dict(item) for item in initial_stage_messages]
+                    stage_messages.append({
+                        "role": "user",
+                        "content": (
+                            f"La sous-tâche précédente n'a pas abouti. Recommence uniquement cette sous-tâche "
+                            f"({index + 1}/{len(steps)}) : {step_request}. Produis une commande complète "
+                            "<tool_call> JSON valide utilisant write ou edit, avec le chemin et tout le contenu "
+                            "nécessaire. Aucun texte autour."
+                        ),
+                    })
+                    self._report_progress(
+                        progress_callback,
+                        f"Reprise de la sous-tâche {index + 1}/{len(steps)} sur une nouvelle génération…",
+                    )
+                if len(steps) == 1:
+                    tool_call, answer = self._generate_tool_call(
+                        stage_messages,
+                        {"mode": "local_code"},
+                        stream=False,
+                        api_key=api_key,
+                        defer_file_actions=True,
+                    )
+                else:
+                    answer = self._ask_with_api_key(
+                        stage_messages,
+                        api_key=api_key,
+                        max_tokens=LOCAL_CODE_MAX_RESPONSE_TOKENS,
+                    )
+                    answer_text = answer if isinstance(answer, str) else "".join(answer)
+                    tool_call = self.parse_tool_call(answer_text)
+                answer_text = answer if isinstance(answer, str) else "".join(answer)
+                if tool_call is None:
+                    stage_messages.extend((
+                        {"role": "assistant", "content": answer_text},
+                        {
+                            "role": "user",
+                            "content": (
+                                "Réponds maintenant uniquement avec un appel <tool_call> JSON valide à write ou edit. "
+                                "Aucun texte avant ou après."
+                            ),
+                        },
+                    ))
+                    continue
+
+                tool_name = tool_call.get("tool")
+                if tool_name in {"write", "edit"}:
+                    if tool_name not in allowed_tools:
+                        return "Plan refusé : l'écriture est désactivée pour ce projet. Aucun fichier n'a été modifié."
+                    arguments = tool_call.get("arguments")
+                    path = str(arguments.get("path") or "").replace("\\", "/").strip() if isinstance(arguments, dict) else ""
+                    if not path or path.casefold() in target_paths:
+                        return "Plan refusé : chaque sous-tâche doit viser un fichier distinct et fournir un chemin. Aucun fichier n'a été modifié."
+                    target_paths.add(path.casefold())
+                    commands.append(tool_call)
+                    break
+                if tool_name not in {"file", "list", "search"} or tool_name not in allowed_tools:
+                    return "Plan refusé : une sous-tâche a demandé un outil non autorisé. Aucun fichier n'a été modifié."
+
+                result, verification, confirmation = self._execute_and_verify(tool_call, chat, allowed_tools)
+                if confirmation is not None or not verification or not verification["verified"] or not verification["success"]:
+                    return "Plan interrompu : une lecture de projet a échoué. Aucun fichier n'a été modifié."
+                stage_messages.extend((
+                    {"role": "assistant", "content": answer_text},
+                    self._tool_message(tool_name, result, verification),
+                ))
+            else:
+                return (
+                    "Plan interrompu : la reprise de la sous-tâche n'a pas produit de commande "
+                    "write/edit valide. Aucun fichier n'a été modifié."
+                )
+
+        return commands
+
+    @staticmethod
+    def parse_file_command_plan(content):
+        text = str(content or "").strip()
+        match = re.fullmatch(r"<file_plan>\s*(.*?)\s*</file_plan>", text, re.S | re.I)
+        if match:
+            try:
+                commands = json.loads(match.group(1))
+            except json.JSONDecodeError:
+                return None
+            if not isinstance(commands, list) or not commands:
+                return None
+            if any(not isinstance(item, dict) or item.get("tool") not in {"write", "edit"} for item in commands):
+                return None
+            return commands
+        tool_call = LocalAgent.parse_tool_call(text)
+        return [tool_call] if isinstance(tool_call, dict) and tool_call.get("tool") in {"write", "edit"} else None
+
+    @classmethod
+    def _serialize_file_command_plan(cls, commands):
+        if len(commands) == 1:
+            return cls._serialize_tool_call(commands[0])
+        return "<file_plan>" + json.dumps(commands, ensure_ascii=False, separators=(",", ":")) + "</file_plan>"
+
+    @staticmethod
+    def _parse_global_verification(response):
+        text = str(response or "").strip()
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.I)
+        match = re.search(r"\{.*\}", text, re.S)
+        if not match:
+            return False, ["Le résultat de vérification n'est pas exploitable."]
+        try:
+            payload = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return False, ["Le résultat de vérification n'est pas un JSON valide."]
+        if not isinstance(payload, dict):
+            return False, ["Le résultat de vérification n'est pas structuré."]
+        correct = payload.get("correct") is True or str(payload.get("status", "")).casefold() in {
+            "correct", "complete", "verified", "ok"
+        }
+        issues = payload.get("issues", [])
+        if isinstance(issues, str):
+            issues = [issues]
+        if not isinstance(issues, list):
+            issues = []
+        return correct, [str(issue).strip() for issue in issues if str(issue).strip()]
+
+    def _verify_and_repair_answer(
+        self,
+        request,
+        draft,
+        *,
+        key_sequence,
+        progress_callback=None,
+        evidence_messages=None,
+    ):
+        if not key_sequence.keys:
+            return draft
+        evidence = [
+            str(item.get("content", ""))[:3500]
+            for item in (evidence_messages or [])
+            if isinstance(item, dict) and item.get("role") == "tool"
+        ][-MAX_MULTI_KEY_STAGES:]
+        verification_prompt = [
+            {
+                "role": "system",
+                "content": (
+                    "Tu es vérificateur final indépendant. Compare la réponse à la demande et aux preuves fournies. "
+                    "Vérifie que toutes les étapes nécessaires sont traitées, qu'aucun résultat d'outil n'est inventé "
+                    "et que les affirmations respectent les preuves. Retourne uniquement un JSON: "
+                    '{"correct":true|false,"issues":["..."],"answer":"..."}. '
+                    "Si une réponse est correcte et complète, correct=true. En cas de doute, correct=false."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {"request": request, "draft": draft, "verified_tool_results": evidence},
+                    ensure_ascii=False,
+                ),
+            },
+        ]
+        self._report_progress(progress_callback, "Vérification globale de la réponse…")
+        first_review = self._ask_with_api_key(
+            verification_prompt,
+            api_key=key_sequence.next_key(),
+            max_tokens=1200,
+        )
+        correct, issues = self._parse_global_verification(first_review)
+        if correct:
+            self._report_progress(progress_callback, "Réponse vérifiée globalement.")
+            return draft
+
+        self._report_progress(progress_callback, "Écart détecté; seconde phase de correction…")
+        repair_prompt = [
+            {
+                "role": "system",
+                "content": (
+                    "Corrige la réponse en couvrant les lacunes listées. Utilise uniquement la demande, le brouillon "
+                    "et les preuves vérifiées fournis. N'exécute aucune action et n'invente aucun résultat. "
+                    "Retourne uniquement la réponse finale corrigée."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "request": request,
+                        "draft": draft,
+                        "issues": issues,
+                        "verified_tool_results": evidence,
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ]
+        repaired = str(
+            self._ask_with_api_key(
+                repair_prompt,
+                api_key=key_sequence.next_key(),
+                max_tokens=LOCAL_CODE_MAX_RESPONSE_TOKENS,
+            )
+            or ""
+        ).strip()
+        if not repaired:
+            repaired = draft
+
+        repair_review_prompt = [
+            verification_prompt[0],
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {"request": request, "draft": repaired, "verified_tool_results": evidence},
+                    ensure_ascii=False,
+                ),
+            },
+        ]
+        second_review = self._ask_with_api_key(
+            repair_review_prompt,
+            api_key=key_sequence.next_key(),
+            max_tokens=1200,
+        )
+        repair_is_correct, remaining_issues = self._parse_global_verification(second_review)
+        if repair_is_correct:
+            self._report_progress(progress_callback, "Réponse corrigée puis vérifiée.")
+            return repaired
+        issue_text = "; ".join(remaining_issues or issues) or "la vérification reste incertaine"
+        self._report_progress(progress_callback, "Réponse partielle; la vérification reste incertaine.")
+        return f"Réponse partielle — vérification à confirmer : {issue_text}\n\n{repaired}"
+
+    def _respond_staged_chat(
+        self,
+        chat,
+        request,
+        external_info,
+        route,
+        key_sequence,
+        progress_callback=None,
+    ):
+        keys = key_sequence.keys
+        base_messages = self.build_messages(chat, request, external_info, tools=set(), route=route)
+        if len(keys) > 1:
+            planner_messages = [dict(message) for message in base_messages]
+            planner_messages[0] = dict(planner_messages[0])
+            planner_messages[0]["content"] += (
+                "\n\n[PLAN_MULTI_CLE] Avant de répondre, décompose la demande en le nombre MINIMAL d'étapes "
+                f"nécessaires, au maximum {min(len(keys), MAX_MULTI_KEY_STAGES)}. "
+                'Retourne uniquement un JSON de la forme {"steps":["étape 1", "étape 2"]}. '
+                "Si la demande se résout en une étape, ne produis qu'une étape."
+            )
+            planner_answer = self._ask_with_api_key(
+                planner_messages,
+                api_key=key_sequence.key_for_stage(0),
+                max_tokens=1000,
+            )
+            steps = self._parse_stage_plan(planner_answer, request, len(keys))
+        else:
+            steps = [request]
+
+        results = []
+        for index, step_request in enumerate(steps):
+            key_index = (index + 1) % len(keys)
+            self._report_progress(
+                progress_callback,
+                f"Étape {index + 1}/{len(steps)} attribuée à la clé {key_index + 1}/{len(keys)}…",
+            )
+            step_messages = [dict(message) for message in base_messages]
+            step_messages[-1] = {
+                "role": "user",
+                "content": (
+                    f"Demande complète : {request}\n"
+                    f"Étapes prévues : {json.dumps(steps, ensure_ascii=False)}\n"
+                    f"Étape à résoudre maintenant ({index + 1}/{len(steps)}) : {step_request}\n"
+                    f"Résultats des étapes précédentes : {json.dumps(results, ensure_ascii=False)}\n"
+                    "Réponds à cette étape sans répéter les étapes déjà résolues."
+                ),
+            }
+            result = str(
+                self._ask_with_api_key(
+                    step_messages,
+                    api_key=key_sequence.key_for_stage(index + 1),
+                    max_tokens=LOCAL_CODE_MAX_RESPONSE_TOKENS,
+                )
+                or ""
+            ).strip()
+            if self.parse_tool_call(result):
+                result = "Cette étape a demandé une action qui n'est pas autorisée dans le mode réponse directe."
+            results.append({"step": step_request, "result": result})
+
+        if len(results) == 1:
+            draft = results[0]["result"]
+        else:
+            draft = "\n\n".join(
+                f"Étape {index + 1} — {item['step']}\n{item['result']}"
+                for index, item in enumerate(results)
+            )
+        key_sequence.index = (len(results) + 1) % len(keys)
+        return self._verify_and_repair_answer(
+            request,
+            draft,
+            key_sequence=key_sequence,
+            progress_callback=progress_callback,
+        )
+
+    @staticmethod
     def _verification_failure(tool_name, verification):
         if tool_name == "write":
             return "Je n'ai pas pu confirmer que le contenu attendu est bien enregistré; je ne peux pas annoncer la création comme terminée."
@@ -500,11 +948,48 @@ class LocalAgent:
         """Phrase de confirmation sans rappeler le modèle (actions simples)."""
         if tool_call["tool"] == "write" and isinstance(result, dict):
             return f"Fichier créé ou modifié : {result.get('path', 'chemin inconnu')}"
+        if tool_call["tool"] == "create_download" and isinstance(result, dict):
+            return f"Fichier prêt à télécharger : {result.get('filename', 'fichier')}"
         if tool_call["tool"] == "launch" and isinstance(result, dict):
             return f"Demande de lancement envoyée pour {result.get('name', tool_call['arguments'].get('name', 'l’application'))}."
         if tool_call["tool"] == "open_page" and isinstance(result, dict):
             return f"Page ouverte dans le navigateur : {result.get('url', 'URL inconnue')}"
         return None
+
+    def _record_generated_download(self, filename, content):
+        try:
+            artifact = download_tool.use(filename, content)
+        except (OSError, ValueError):
+            return None
+        self.generated_downloads.append({
+            "artifact_id": artifact["artifact_id"],
+            "filename": artifact["filename"],
+            "size": artifact["size"],
+        })
+        return artifact
+
+    def _cache_code_response(self, request, answer):
+        match = re.search(r"```([\w+.-]*)[^\S\n]*\n(.*?)```", str(answer or ""), re.DOTALL)
+        if not match or not match.group(2).strip():
+            return
+        language = match.group(1).casefold()
+        extensions = {
+            "py": "py", "python": "py", "python3": "py",
+            "js": "js", "javascript": "js", "ts": "ts", "typescript": "ts",
+            "html": "html", "css": "css", "json": "json", "sh": "sh", "bash": "sh",
+        }
+        normalized_request = unicodedata.normalize("NFKD", str(request).casefold())
+        request_ascii = normalized_request.encode("ascii", "ignore").decode("ascii")
+        extension = extensions.get(language, "py" if "python" in request_ascii else "txt")
+        ignored = {
+            "cree", "creer", "ecris", "ecrire", "genere", "generer", "fais", "faire",
+            "un", "une", "le", "la", "les", "de", "du", "des", "pour", "qui", "avec",
+            "script", "programme", "fichier", "code", "python", "javascript", "typescript",
+        }
+        words = [word for word in re.findall(r"[a-z0-9]+", request_ascii) if word not in ignored]
+        basename = "-".join(words[-3:])[:48].strip("-") or "script"
+        content = match.group(2).strip("\r\n") + "\n"
+        self._record_generated_download(f"{basename}.{extension}", content)
 
     def _explicit_command(self, message, chat, allowed_tools):
         """Exécute /commande directement, sans demander au modèle de reconstruire argv."""
@@ -549,15 +1034,80 @@ class LocalAgent:
     # ------------------------------------------------------------------
     # Réponse à un message
     # ------------------------------------------------------------------
-    def respond(self, chat, message, external_info=None, allowed_tools=None, stream=False, local_code=False):
+    def respond(
+        self,
+        chat,
+        message,
+        external_info=None,
+        allowed_tools=None,
+        stream=False,
+        local_code=False,
+        defer_file_actions=False,
+        progress_callback=None,
+    ):
+        self.generated_downloads = []
         pending_tool, route, selected_tools, direct_answer = self._resolve_response_route(
             chat, message, allowed_tools, local_code
         )
         if direct_answer is not None:
+            self._report_progress(progress_callback, "Réponse directe prête.")
             return direct_answer
         assert route is not None and selected_tools is not None
+        key_sequence = RequestKeySequence(openrouter_api_keys())
+        if route.get("mode") in {"chat", "command_suggestion"} and len(key_sequence.keys) > 1:
+            return self._respond_staged_chat(
+                chat,
+                message,
+                external_info,
+                route,
+                key_sequence,
+                progress_callback=progress_callback,
+            )
+        route_messages = {
+            "code_artifact": "Préparation du fichier de code…",
+            "command_suggestion": "Préparation de la commande à copier…",
+            "install_application": "Vérification de l'application et de la méthode d'installation…",
+            "web": "Recherche des informations…",
+            "chat": "Préparation de la réponse…",
+        }
+        self._report_progress(
+            progress_callback,
+            route_messages.get(route.get("action"), "Analyse de la demande…"),
+        )
 
         messages = self.build_messages(chat, message, external_info, tools=selected_tools, route=route)
+        if len(key_sequence.keys) > 1 and (
+            defer_file_actions or route.get("action") == "code_artifact"
+        ):
+            planned_steps = self._plan_tool_stages(
+                message,
+                messages,
+                key_sequence,
+                progress_callback=progress_callback,
+            )
+            commands = self._generate_deferred_file_commands(
+                messages,
+                message,
+                planned_steps,
+                chat,
+                selected_tools,
+                key_sequence,
+                progress_callback=progress_callback,
+            )
+            if isinstance(commands, str):
+                return commands
+            if defer_file_actions:
+                return self._serialize_file_command_plan(commands)
+            answer = self.apply_approved_file_call(commands, chat, allowed_tools=selected_tools)
+            self._report_progress(progress_callback, "Sous-tâches terminées et vérifiées.")
+            return answer
+
+        planned_steps = [] if defer_file_actions else self._plan_tool_stages(
+            message,
+            messages,
+            key_sequence,
+            progress_callback=progress_callback,
+        )
         if pending_tool:
             tool_call = pending_tool
             tool_call["arguments"]["confirmed"] = True
@@ -565,11 +1115,58 @@ class LocalAgent:
                 allowed_tools = set(allowed_tools) | {tool_call["tool"]}
             answer = "<tool_call>" + json.dumps(tool_call, ensure_ascii=False) + "</tool_call>"
         else:
-            tool_call, answer = self._generate_tool_call(messages, route, stream)
+            tool_call, answer = self._generate_tool_call(
+                messages,
+                route,
+                stream,
+                api_key=key_sequence.next_key(),
+                defer_file_actions=defer_file_actions,
+            )
             if tool_call is None:
+                if defer_file_actions:
+                    return "Aucune commande write/edit valide n'a été produite; aucun fichier n'a été modifié."
+                if route.get("action") == "code_artifact" and not local_code:
+                    self._cache_code_response(message, answer)
+                self._report_progress(progress_callback, "Réponse prête.")
+                if len(key_sequence.keys) > 1:
+                    return self._verify_and_repair_answer(
+                        message,
+                        str(answer or ""),
+                        key_sequence=key_sequence,
+                        progress_callback=progress_callback,
+                    )
                 return answer
+            if route.get("mode") == "command_suggestion":
+                if tool_call.get("tool") == "command":
+                    argv = tool_call.get("arguments", {}).get("argv")
+                elif tool_call.get("tool") == "launch":
+                    name = tool_call.get("arguments", {}).get("name")
+                    argv = [name] if isinstance(name, str) else None
+                else:
+                    argv = None
+                if isinstance(argv, list) and argv and all(isinstance(item, str) and item for item in argv):
+                    self._report_progress(progress_callback, "Commande prête à copier; aucune commande exécutée.")
+                    copyable_answer = f"Commande à copier :\n```sh\n{program_commands.format_command(argv)}\n```"
+                    if len(key_sequence.keys) > 1:
+                        return self._verify_and_repair_answer(
+                            message,
+                            copyable_answer,
+                            key_sequence=key_sequence,
+                            progress_callback=progress_callback,
+                        )
+                    return copyable_answer
+                self._report_progress(progress_callback, "Commande non reconnue; aucune commande exécutée.")
+                return "Je n'ai exécuté aucune commande. Précise l'application ou l'action pour que je fournisse une commande copiable."
 
         seen = set()
+        stage_context = (
+            f"Étapes planifiées (minimum nécessaire) : {json.dumps(planned_steps, ensure_ascii=False)}. "
+            "Traite-les dans l'ordre, avec une seule action par étape logique, sans répéter le travail déjà vérifié."
+            if planned_steps
+            else ""
+        )
+        if stage_context:
+            messages.append({"role": "system", "content": stage_context})
         last_call, last_result, last_error = tool_call, None, None
         verification_failures = []
         tool_limit = self.get_max_tool_steps(route)
@@ -577,12 +1174,37 @@ class LocalAgent:
         if chunked_write:
             tool_limit = max(tool_limit, MAX_CHUNKED_WRITE_STEPS)
         step = 0
+        loop_detected = False
         while step < tool_limit:
+            if defer_file_actions:
+                if tool_call["tool"] in {"write", "edit"}:
+                    if tool_call["tool"] in selected_tools:
+                        return self._serialize_tool_call(tool_call)
+                    return "Commande refusée : l'écriture de fichiers est désactivée pour ce projet."
+                if tool_call["tool"] not in {"file", "list", "search"}:
+                    return "Commande refusée : le mode Code n'accepte que la lecture ou une commande write/edit."
             key = self.normalize_tool_call(tool_call)
             if key in seen:
+                loop_detected = True
+                self._report_progress(progress_callback, "Répétition détectée; arrêt des actions.")
                 break  # le modèle tourne en rond : on s'arrête
             seen.add(key)
             last_call = tool_call
+            tool_labels = {
+                "file": "Lecture de fichier",
+                "write": "Écriture de fichier",
+                "edit": "Modification de fichier",
+                "list": "Liste des fichiers",
+                "search": "Recherche dans les fichiers",
+                "command": "Exécution de commande",
+                "system": "Action système",
+                "launch": "Lancement d'application",
+                "web": "Recherche Web",
+                "calculator": "Calcul",
+                "open_page": "Ouverture de page",
+            }
+            tool_label = tool_labels.get(tool_call["tool"], "Action")
+            self._report_progress(progress_callback, f"Étape {step + 1}/{tool_limit} : {tool_label}…")
             result, verification, confirmation_message = self._execute_and_verify(
                 tool_call, chat, selected_tools
             )
@@ -590,8 +1212,35 @@ class LocalAgent:
 
             if confirmation_message is not None:
                 chat["pending_tool"] = tool_call
+                self._report_progress(progress_callback, "En attente de confirmation avant l'action.")
                 return f"{confirmation_message}\nRéponds « oui » pour confirmer."
             assert verification is not None
+            if tool_call["tool"] == "create_download" and verification["success"] and isinstance(result, dict):
+                self.generated_downloads.append({
+                    "artifact_id": result["artifact_id"],
+                    "filename": result["filename"],
+                    "size": result["size"],
+                })
+            elif (
+                route.get("action") == "code_artifact"
+                and not local_code
+                and tool_call["tool"] == "write"
+                and verification["success"]
+                and isinstance(result, dict)
+            ):
+                try:
+                    created_path = Path(result.get("path", ""))
+                    if created_path.stat().st_size <= download_tool.MAX_DOWNLOAD_BYTES:
+                        self._record_generated_download(
+                            created_path.name,
+                            created_path.read_text(encoding="utf-8"),
+                        )
+                except (OSError, UnicodeError, ValueError):
+                    pass
+            self._report_progress(
+                progress_callback,
+                f"{tool_label} terminé et vérifié." if verification["success"] else f"{tool_label} bloqué ou non vérifié.",
+            )
 
             payload = result if result is not None else {"error": "L'appel à cet outil n'a pas abouti. Vérifie les arguments et réessaie."}
             if not verification["verified"] or not verification["success"]:
@@ -612,20 +1261,43 @@ class LocalAgent:
             ):
                 summary = self._summary(tool_call, result) if verification["success"] else None
                 if summary:
+                    self._report_progress(progress_callback, "Action terminée; résultat vérifié.")
+                    if len(key_sequence.keys) > 1:
+                        return self._verify_and_repair_answer(
+                            message,
+                            summary,
+                            key_sequence=key_sequence,
+                            progress_callback=progress_callback,
+                            evidence_messages=[self._tool_message(tool_call["tool"], payload, verification)],
+                        )
                     return summary  # action simple : inutile de rappeler le modèle
 
             messages.append({"role": "assistant", "content": answer})
             messages.append(self._tool_message(tool_call["tool"], payload, verification))
-            answer = ask_ollama(
-                list(messages),
-                model=self.model,
-                max_tokens=LOCAL_CODE_MAX_RESPONSE_TOKENS if route.get("mode") == "local_code" else None,
+            answer = self._ask_with_api_key(
+                messages,
+                api_key=key_sequence.next_key(),
+                max_tokens=LOCAL_CODE_MAX_RESPONSE_TOKENS if route.get("mode") in {"local_code", "code"} else None,
             )
             tool_call = self.parse_tool_call(answer)
             if not tool_call:
+                if defer_file_actions:
+                    return "Aucune commande write/edit valide n'a été produite; aucun fichier n'a été modifié."
+                if route.get("action") == "code_artifact" and not local_code:
+                    self._cache_code_response(message, answer)
                 if verification_failures:
                     failed_tool, failed_verification = verification_failures[-1]
+                    self._report_progress(progress_callback, "Action interrompue après une vérification négative.")
                     return self._verification_failure(failed_tool, failed_verification)
+                self._report_progress(progress_callback, "Réponse finale prête.")
+                if len(key_sequence.keys) > 1:
+                    return self._verify_and_repair_answer(
+                        message,
+                        str(answer or ""),
+                        key_sequence=key_sequence,
+                        progress_callback=progress_callback,
+                        evidence_messages=messages,
+                    )
                 return answer
             step += 1
             if (
@@ -638,15 +1310,29 @@ class LocalAgent:
 
         if chunked_write and tool_call is not None and step >= tool_limit:
             path = tool_call["arguments"].get("path") or last_call["arguments"].get("path", "le fichier")
+            self._report_progress(progress_callback, "Écriture incomplète; une suite est nécessaire.")
             return f"L'écriture de {path} continue au-delà des blocs traités dans cette réponse. Demande-moi de la continuer."
+        if not chunked_write and not loop_detected and step >= tool_limit and tool_call is not None:
+            self._report_progress(progress_callback, "Limite d'actions atteinte; demande non confirmée comme terminée.")
+            return (
+                f"Je me suis arrêté après {tool_limit} actions consécutives pour éviter de tourner en rond. "
+                "La demande n'est pas confirmée comme terminée; découpe-la en étapes plus petites."
+            )
         if verification_failures:
             failed_tool, failed_verification = verification_failures[-1]
+            self._report_progress(progress_callback, "Action interrompue après une vérification négative.")
             return self._verification_failure(failed_tool, failed_verification)
+        if loop_detected:
+            summary = self._summary(last_call, last_result)
+            self._report_progress(progress_callback, "Arrêt après répétition détectée.")
+            return summary or f"J'ai arrêté l'action {last_call['tool']} après une répétition pour éviter de tourner en rond."
         if last_error:
+            self._report_progress(progress_callback, "Action échouée.")
             if last_call["tool"] == "command":
                 return "Je n'ai pas pu exécuter cette commande. Vérifie le programme, ses arguments et les autorisations."
             return "Je n'ai pas pu terminer cette action. Vérifie les informations fournies et réessaie."
         summary = self._summary(last_call, last_result)
+        self._report_progress(progress_callback, "Action terminée." if summary else "Réponse prête.")
         return summary or f"Action {last_call['tool']} exécutée."
 
     def _execute_and_verify(self, tool_call, chat, allowed_tools):
@@ -662,28 +1348,69 @@ class LocalAgent:
             return result, None, result.get("message", "Confirmation nécessaire.")
         return result, ToolManager.verify_result(tool_call, result, chat), None
 
-    def _generate_tool_call(self, messages, route, stream):
-        answer = ask_ollama(
-            list(messages),
-            model=self.model,
+    def apply_approved_file_call(self, tool_call, chat, allowed_tools=None):
+        if isinstance(tool_call, str):
+            tool_calls = self.parse_file_command_plan(tool_call)
+        elif isinstance(tool_call, dict):
+            tool_calls = [tool_call]
+        else:
+            tool_calls = tool_call
+        if not isinstance(tool_calls, list) or not tool_calls or any(
+            not isinstance(item, dict) or item.get("tool") not in {"write", "edit"}
+            for item in tool_calls
+        ):
+            raise ValueError("La proposition approuvée doit contenir des appels write/edit valides.")
+
+        summaries = []
+        for item in tool_calls:
+            result, verification, confirmation = self._execute_and_verify(item, chat, allowed_tools)
+            if confirmation is not None:
+                raise ValueError(confirmation)
+            if not verification or not verification["verified"] or not verification["success"]:
+                raise ValueError(self._verification_failure(item["tool"], verification or {}))
+            summaries.append(self._summary(item, result))
+            if item["tool"] == "write" and not chat.get("code_project_path") and isinstance(result, dict):
+                try:
+                    created_path = Path(result.get("path", ""))
+                    if created_path.stat().st_size <= download_tool.MAX_DOWNLOAD_BYTES:
+                        self._record_generated_download(
+                            created_path.name,
+                            created_path.read_text(encoding="utf-8"),
+                        )
+                except (OSError, UnicodeError, ValueError):
+                    pass
+        return "\n".join(summaries)
+
+    @staticmethod
+    def _serialize_tool_call(tool_call):
+        payload = json.dumps(tool_call, ensure_ascii=False, separators=(",", ":"))
+        return f"<tool_call>{payload}</tool_call>"
+
+    def _generate_tool_call(self, messages, route, stream, api_key=None, defer_file_actions=False):
+        answer = self._ask_with_api_key(
+            messages,
+            api_key=api_key,
             stream=bool(stream),
-            max_tokens=LOCAL_CODE_MAX_RESPONSE_TOKENS if route.get("mode") == "local_code" else None,
+            max_tokens=LOCAL_CODE_MAX_RESPONSE_TOKENS if route.get("mode") in {"local_code", "code"} else None,
         )
         tool_call = self.parse_tool_call(answer if isinstance(answer, str) else "".join(answer))
-        if not tool_call and route.get("mode") == "local_code":
+        if not tool_call and route.get("mode") in {"local_code", "code"}:
             answer_text = answer if isinstance(answer, str) else "".join(answer)
             messages.append({"role": "assistant", "content": answer_text})
             messages.append({
                 "role": "user",
                 "content": (
-                    "Tu as décrit un plan, mais tu n'as pas encore agi. Continue maintenant sans attendre "
+                    "Retourne maintenant un seul appel <tool_call> JSON valide à write ou edit, sans aucun texte "
+                    "avant ni après. N'exécute pas de commande shell."
+                    if defer_file_actions or route.get("mode") == "code"
+                    else "Tu as décrit un plan, mais tu n'as pas encore agi. Continue maintenant sans attendre "
                     "de réponse de l'utilisateur : utilise les outils autorisés pour réaliser la demande. "
                     "Ne renvoie un texte que si une information réellement indispensable bloque le travail."
                 ),
             })
-            answer = ask_ollama(
-                list(messages),
-                model=self.model,
+            answer = self._ask_with_api_key(
+                messages,
+                api_key=api_key,
                 max_tokens=LOCAL_CODE_MAX_RESPONSE_TOKENS,
             )
             tool_call = self.parse_tool_call(answer if isinstance(answer, str) else "".join(answer))
@@ -718,6 +1445,7 @@ class LocalAgent:
             }
             self.last_route = route
         elif not pending_tool:
+            existing_code_file = self._recent_created_file(chat)
             route = self.router.route(
                 message,
                 lambda current_message, tools: (
@@ -725,6 +1453,7 @@ class LocalAgent:
                     or self._contextual_app_correction(chat, current_message, tools)
                 ),
                 allowed_tools,
+                existing_code_file=existing_code_file,
             )
             self.last_route = route
             logging.getLogger(__name__).debug(
@@ -746,6 +1475,23 @@ class LocalAgent:
             self.last_route = route
 
         return pending_tool, route, selected_tools, None
+
+    @staticmethod
+    def _recent_created_file(chat):
+        messages = chat.get("messages", []) if isinstance(chat, dict) else []
+        for entry in reversed(messages):
+            if not isinstance(entry, dict) or entry.get("role") != "assistant":
+                continue
+            match = _CREATED_FILE_RE.search(str(entry.get("content", "")))
+            if not match:
+                continue
+            path = Path(match.group("path").strip().strip('"`'))
+            try:
+                if path.is_file():
+                    return str(path.resolve())
+            except (OSError, RuntimeError, ValueError):
+                continue
+        return None
 
     def close(self):
         self.connection.close()

@@ -7,6 +7,7 @@ import json
 import re
 import threading
 from datetime import datetime
+from pathlib import Path
 from queue import Queue
 
 from local_ia.config.manager import BASE_DIR
@@ -14,6 +15,7 @@ from local_ia.config.manager import BASE_DIR
 CHAT_DIR = BASE_DIR / "chats"
 MAX_HISTORY = 8
 HISTORY_IMPORTANCE_DECAY = 0.75
+MAX_IMPORTED_CHAT_BYTES = 10 * 1024 * 1024
 _WRITE_QUEUE = Queue()
 _WRITE_THREAD = None
 _TOPIC_MARKER_RE = re.compile(
@@ -186,9 +188,128 @@ def chat_path(chat_id):
 
 def create_chat():
     init_chats()
-    ids = [int(path.stem) for path in CHAT_DIR.glob("*.json") if path.stem.isdigit()]
     now = datetime.now().isoformat()
-    chat = {"id": max(ids, default=0) + 1, "created_at": now, "updated_at": now, "title": "", "summary": "", "summary_updated_at": now, "topic": None, "messages": [], "files": []}
+    chat = {"id": _next_chat_id(), "created_at": now, "updated_at": now, "title": "", "custom_title": "", "category": "", "summary": "", "summary_updated_at": now, "topic": None, "messages": [], "files": []}
+    save_chat(chat, async_mode=False)
+    return chat
+
+
+def _next_chat_id():
+    init_chats()
+    ids = [int(path.stem) for path in CHAT_DIR.glob("*.json") if path.stem.isdigit()]
+    return max(ids, default=0) + 1
+
+
+def rename_chat(chat_id, title):
+    title = str(title or "").strip()
+    if not title:
+        raise ValueError("Le nom de la conversation ne peut pas être vide.")
+    if len(title) > 120:
+        raise ValueError("Le nom de la conversation doit faire 120 caractères maximum.")
+    chat = load_chat(chat_id)
+    if chat is None:
+        raise FileNotFoundError(f"Conversation introuvable : {chat_id}")
+    chat["custom_title"] = title
+    save_chat(chat, async_mode=False)
+    return chat
+
+
+def set_chat_category(chat_id, category):
+    category = str(category or "").strip()
+    if len(category) > 64:
+        raise ValueError("La catégorie doit faire 64 caractères maximum.")
+    chat = load_chat(chat_id)
+    if chat is None:
+        raise FileNotFoundError(f"Conversation introuvable : {chat_id}")
+    chat["category"] = category
+    save_chat(chat, async_mode=False)
+    return chat
+
+
+def copy_chat(chat_id):
+    chat = load_chat(chat_id)
+    if chat is None:
+        raise FileNotFoundError(f"Conversation introuvable : {chat_id}")
+    duplicate = copy.deepcopy(chat)
+    now = datetime.now().isoformat()
+    duplicate["id"] = _next_chat_id()
+    duplicate["created_at"] = now
+    duplicate["updated_at"] = now
+    duplicate["summary_updated_at"] = now
+    duplicate["custom_title"] = (str(chat.get("custom_title") or chat.get("topic") or chat.get("title") or "Conversation") + " (copie)")[:120]
+    duplicate.pop("pending_tool", None)
+    duplicate.pop("pending_command", None)
+    save_chat(duplicate, async_mode=False)
+    return duplicate
+
+
+def delete_chat(chat_id):
+    flush_writes()
+    try:
+        target = chat_path(chat_id)
+    except (TypeError, ValueError):
+        return False
+    if not target.is_file():
+        return False
+    target.unlink()
+    return True
+
+
+def export_chat(chat_id, destination):
+    chat = load_chat(chat_id)
+    if chat is None:
+        raise FileNotFoundError(f"Conversation introuvable : {chat_id}")
+    target = Path(destination).expanduser()
+    target.write_text(json.dumps(chat, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return target
+
+
+def import_chat(source):
+    if isinstance(source, dict):
+        payload = copy.deepcopy(source)
+    else:
+        source_path = Path(source).expanduser()
+        if source_path.stat().st_size > MAX_IMPORTED_CHAT_BYTES:
+            raise ValueError("Le fichier dépasse la taille maximale de 10 Mo.")
+        try:
+            payload = json.loads(source_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:
+            raise ValueError("Fichier de conversation invalide ou illisible.") from error
+    if not isinstance(payload, dict):
+        raise ValueError("Le fichier ne contient pas une conversation valide.")
+
+    messages = payload.get("messages", [])
+    if not isinstance(messages, list):
+        raise ValueError("La liste des messages est invalide.")
+    valid_messages = []
+    for message in messages:
+        if not isinstance(message, dict) or message.get("role") not in {"user", "assistant", "system", "tool"}:
+            raise ValueError("Un message de la conversation est invalide.")
+        if not isinstance(message.get("content"), str):
+            raise ValueError("Le contenu d'un message doit être du texte.")
+        valid_messages.append(copy.deepcopy(message))
+
+    files = payload.get("files", [])
+    if not isinstance(files, list) or not all(isinstance(item, dict) for item in files):
+        raise ValueError("La liste des fichiers joints est invalide.")
+
+    now = datetime.now().isoformat()
+    chat = {
+        "id": _next_chat_id(),
+        "created_at": now,
+        "updated_at": now,
+        "title": str(payload.get("title") or "")[:120],
+        "custom_title": str(payload.get("custom_title") or "")[:120],
+        "category": str(payload.get("category") or "")[:64],
+        "summary": str(payload.get("summary") or ""),
+        "summary_updated_at": now,
+        "topic": payload.get("topic") if isinstance(payload.get("topic"), str) else None,
+        "messages": valid_messages,
+        "files": copy.deepcopy(files),
+    }
+    for key in ("code_project_name", "code_project_path"):
+        if isinstance(payload.get(key), str):
+            chat[key] = payload[key]
     save_chat(chat, async_mode=False)
     return chat
 
@@ -197,6 +318,10 @@ def save_chat(chat, async_mode=True):
     init_chats()
     if not isinstance(chat.get("title"), str):
         chat["title"] = ""
+    if not isinstance(chat.get("custom_title"), str):
+        chat["custom_title"] = ""
+    if not isinstance(chat.get("category"), str):
+        chat["category"] = ""
     _refresh_chat_title(chat)
     chat["updated_at"] = datetime.now().isoformat()
     if not isinstance(chat.get("summary_updated_at"), str) or not chat["summary_updated_at"]:
@@ -229,6 +354,10 @@ def load_chat(chat_id):
         chat["summary"] = ""
     if not isinstance(chat.get("title"), str):
         chat["title"] = ""
+    if not isinstance(chat.get("custom_title"), str):
+        chat["custom_title"] = ""
+    if not isinstance(chat.get("category"), str):
+        chat["category"] = ""
     if not isinstance(chat.get("summary_updated_at"), str):
         chat["summary_updated_at"] = chat.get("updated_at") or datetime.now().isoformat()
     if chat.get("topic") is not None and not isinstance(chat["topic"], str):

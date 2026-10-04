@@ -1,0 +1,31 @@
+OUTIL : document
+
+ROLE
+Lire, créer et convertir des documents; analyser et transformer des tableaux;
+exécuter des requêtes SQLite en lecture seule; comparer des fichiers; produire
+des graphiques SVG et traiter des archives ZIP.
+
+ACTIONS
+- read_document : path, ocr (facultatif; nécessite Tesseract et Poppler pour PDF scanné)
+- create_document : path, format, content ou rows
+- convert_document : source, destination
+- analyze_table : path CSV, TSV, JSON ou XLSX
+- transform_table : path, destination, operation sort|filter|clean, column, value
+- sqlite_query : path, query SELECT ou WITH uniquement
+- compare_metadata : left, right
+- create_chart : path SVG, title, labels et values
+- create_archive : destination ZIP et paths
+- extract_archive : path ZIP et destination
+
+SECURITE
+Tous les chemins doivent être dans les racines autorisées. Les fichiers de
+sortie existants ne sont jamais écrasés. Les bases SQLite sont ouvertes en
+lecture seule et les opérations d'écriture sont refusées. Les archives exigent
+confirmation; les chemins absolus, traversées, liens symboliques, doublons et
+écrasements sont refusés.
+
+LIMITES
+Taille de document: 20 Mo. Les tableaux sont limités à 20 000 lignes. Les
+requêtes SQLite sont SELECT/WITH et limitées en durée de calcul. Lecture PDF,
+création PDF et formats Office nécessitent les dépendances du projet. L'OCR
+pour les PDF scannés nécessite en plus Tesseract et les dépendances OCR système.

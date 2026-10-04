@@ -8,7 +8,7 @@ import hashlib
 import file_commands
 from local_ia.core import code_projects
 from local_ia.tools import browser, calculator, command, context as context_tool, edit, file as file_tool
-from local_ia.tools import launch, listing, memory, search, system, web, write
+from local_ia.tools import download, documents, launch, listing, memory, search, system, web, write
 
 TOOL_INSTRUCTIONS = """Tu disposes d'outils locaux pour agir sur l'ordinateur de l'utilisateur.
 
@@ -19,13 +19,28 @@ Outils et arguments :
 - search : {"pattern":"...", "path":"...", "extension":"py"} — chercher du texte dans des fichiers.
 - file : {"path":"..."} — lire un fichier.
 - write : {"path":"...", "content":"...", "append":false} — créer/réécrire ou ajouter un bloc avec append:true.
+- create_download : {"filename":"...", "content":"...", "extension":"txt"} — créer un fichier texte dans fichiers_generes/ et le proposer au téléchargement dans le GUI.
+- document : outil de documents et données — voir les actions ci-dessous; read_document accepte ocr:true pour les PDF scannés.
+- document : {"action":"...", ...} — lire/créer des documents PDF/Office, analyser ou transformer des tableaux, créer des graphiques, comparer des fichiers, traiter des archives avec confirmation, interroger SQLite en lecture seule.
 - edit : {"path":"...", "old":"texte exact", "new":"remplacement"} — corriger une partie d'un fichier.
 - launch : {"name":"..."} — lancer une application par son nom ou son chemin ; mémoriser tout chemin fourni.
 - command : {"argv":["programme","argument"], "cwd":"/dossier"} — exécuter une commande, sans shell ni pipe.
-- system : {"action":"info|up|down|mute|unmute|install|update", "value":"nom-paquet"}
+- system : {"action":"info|up|down|mute|unmute|install_app|install|update", "value":"nom-application-ou-paquet"}
 - calculator : {"expression":"sqrt(81) + 12 * 3"} — calculer une expression arithmétique.
 - web : {"query":"...", "category":"web|news|sites|ads|weather", "max_results":5} — chercher sur Google (repli automatique si indisponible). Catégories : web, news, sites officiels, annonces, météo.
 - open_page : {"url":"https://example.com"} — ouvrir une page web demandée explicitement dans le navigateur par défaut du PC.
+
+Actions de document :
+- read_document : {"path":"...", "ocr":false} — extraire le texte d'un PDF, DOCX, XLSX, PPTX ou fichier texte; ocr:true pour un PDF scanné.
+- create_document : {"path":"...", "format":"pdf|docx|xlsx|pptx|csv|tsv|json|txt|md", "content":"...", "rows":[...]} — créer sans écraser un fichier existant.
+- convert_document : {"source":"...", "destination":"..."} — convertir le texte extrait vers le format indiqué par l'extension de destination.
+- analyze_table : {"path":"..."} — analyser les colonnes, types, lignes et fournir un petit échantillon.
+- transform_table : {"path":"...", "destination":"...", "operation":"sort|filter|clean", "column":"...", "value":"..."}.
+- sqlite_query : {"path":"...", "query":"SELECT ..."} — SELECT/WITH uniquement; base ouverte en lecture seule.
+- compare_metadata : {"left":"...", "right":"..."} — comparer extension, taille et contenu.
+- create_chart : {"path":"...svg", "title":"...", "labels":[...], "values":[...]} — produire un graphique SVG.
+- create_archive : {"destination":"...zip", "paths":[...]} — demander confirmation avant création.
+- extract_archive : {"path":"...zip", "destination":"..."} — demander confirmation; chemins dangereux, liens symboliques et écrasements sont refusés.
 
 Pour utiliser un outil, réponds UNIQUEMENT avec cette structure :
 <tool_call>{"tool":"file","arguments":{"path":"/chemin/fichier"}}</tool_call>
@@ -141,6 +156,8 @@ class ToolResultCompressor:
 class ToolManager:
     TOOL_GROUPS = {
         "filesystem": frozenset({"file", "write", "edit", "list", "search"}),
+        "downloads": frozenset({"create_download"}),
+        "documents": frozenset({"document"}),
         "system": frozenset({"launch", "command", "system"}),
         "web": frozenset({"web"}),
         "browser": frozenset({"open_page"}),
@@ -155,10 +172,12 @@ class ToolManager:
         "search": 'search : {"pattern":"...", "path":"...", "extension":"py"} — chercher dans des fichiers.',
         "file": 'file : {"path":"..."} — lire un fichier.',
         "write": 'write : {"path":"...", "content":"...", "append":false} — créer/réécrire ou ajouter un bloc avec append:true.',
+        "create_download": 'create_download : {"filename":"...", "content":"...", "extension":"txt"} — créer un fichier texte dans fichiers_generes/ et le proposer au téléchargement via le GUI.',
+        "document": 'document : action parmi read_document, create_document, convert_document, analyze_table, transform_table, sqlite_query, compare_metadata, create_chart, create_archive, extract_archive. Respecter les formats et arguments décrits dans les consignes de l’outil.',
         "edit": 'edit : {"path":"...", "old":"texte exact", "new":"remplacement"} — modifier un fichier.',
         "launch": 'launch : {"name":"..."} — lancer une application par son nom ou son chemin ; mémoriser tout chemin fourni.',
         "command": 'command : {"argv":["programme","argument"], "cwd":"/dossier"} — exécuter sans shell.',
-        "system": 'system : {"action":"info|up|down|mute|unmute|install|update", "value":"nom-paquet"} — information ou action système.',
+        "system": 'system : {"action":"info|up|down|mute|unmute|install_app|install|update", "value":"nom-application-ou-paquet"} — utiliser install_app pour une application du catalogue.',
         "web": 'web : {"query":"...", "category":"web|news|sites|ads|weather", "max_results":5} — rechercher sur Google, avec repli automatique. Utiliser news pour les actualités, sites pour trouver un site officiel, ads pour les annonces, weather pour la météo.',
         "open_page": 'open_page : {"url":"https://example.com"} — ouvrir une page HTTP(S) demandée explicitement dans le navigateur par défaut.',
         "calculator": 'calculator : {"expression":"..."} — calculer une expression arithmétique avec +, -, *, /, //, %, **, parenthèses, constantes et fonctions mathématiques. Utilise cet outil pour les calculs au lieu de calculer mentalement.',
@@ -222,6 +241,12 @@ class ToolManager:
                 scoped_path(arg(arguments, "path")), arg(arguments, "content"),
                 arguments.get("extension"), allowed_roots, bool(arguments.get("append", False)),
             )
+        if tool_name == "create_download":
+            return download.use(
+                arg(arguments, "filename"), arg(arguments, "content"), arguments.get("extension")
+            )
+        if tool_name == "document":
+            return documents.use(arguments, allowed_roots)
         if tool_name == "edit":
             return edit.use(
                 scoped_path(arg(arguments, "path")), arg(arguments, "old"), arg(arguments, "new"),
@@ -324,6 +349,23 @@ class ToolManager:
             except (OSError, TypeError, ValueError):
                 return {"verified": False, "success": False, "evidence": "Impossible de relire le fichier dans son périmètre autorisé."}
 
+        if tool_name == "create_download":
+            try:
+                path = download.resolve_cached_file(result.get("artifact_id"), result.get("filename"))
+                payload = path.read_bytes()
+                matches = (
+                    result.get("ready") is True
+                    and result.get("size") == len(payload)
+                    and result.get("sha256") == hashlib.sha256(payload).hexdigest()
+                )
+            except (OSError, TypeError, ValueError):
+                matches = False
+            return {
+                "verified": matches,
+                "success": matches,
+                "evidence": "Fichier cache relu et empreinte vérifiée." if matches else "Le fichier cache n’a pas pu être vérifié.",
+            }
+
         if tool_name in {"command", "system"} and "returncode" in result:
             returncode = result.get("returncode")
             valid_status = isinstance(returncode, int) and not isinstance(returncode, bool)
@@ -397,6 +439,11 @@ class ToolManager:
             lines.append(
                 "Pour un grand fichier, crée le premier bloc avec append:false puis ajoute les blocs suivants dans l'ordre avec append:true. En cas de reprise, continue avec append:true."
             )
+        if "document" in selected:
+            lines.extend([
+                "document prend un objet arguments avec action. Actions: read_document(path, ocr); create_document(path, format, content ou rows); convert_document(source, destination); analyze_table(path); transform_table(path, destination, operation sort|filter|clean, column, value); sqlite_query(path, query SELECT/WITH seulement); compare_metadata(left, right); create_chart(path SVG, title, labels, values); create_archive(destination, paths); extract_archive(path, destination).",
+                "Les archives nécessitent une confirmation utilisateur. Ne définis jamais confirmed toi-même; réponds à la demande de confirmation. Les sorties ne remplacent jamais un fichier existant. Les chemins restent dans les racines autorisées. L'OCR PDF nécessite Tesseract et Poppler.",
+            ])
         if "system" in selected:
             lines.append("Pour une information système, utilise system avec l'action info.")
         return "\n".join(lines)

@@ -1,0 +1,13 @@
+MISE EN FORME — FICHE DE RÉFÉRENCE
+
+Avant de styliser, définir le support, le public et la hiérarchie de l'information. Utiliser des titres explicites, des paragraphes courts et des listes pour les éléments parallèles.
+
+Markdown : # titre, ## section, **gras** pour un repère bref, *italique* avec parcimonie, - liste, 1. étapes ordonnées, `code` pour une commande ou un nom technique, > citation, [texte](URL) lien descriptif. Laisser une ligne vide entre les blocs.
+
+Typographie : limiter le nombre de polices et de tailles; garder une largeur de ligne confortable; aligner le texte à gauche pour la lecture courante. Éviter les majuscules longues, les soulignements décoratifs et l'accumulation de gras.
+
+Code : indentation constante, noms explicites, une responsabilité par fonction. Formater avec l'outil du langage du projet; ne pas changer le style sans raison.
+
+Interface : cohérence des espacements, alignements et états (normal, survol, focus, désactivé, erreur). Le contraste et la lisibilité priment sur la décoration. Vérifier le rendu sur écran étroit et au zoom.
+
+Documents imprimés : titres hiérarchisés, marges régulières, pagination si nécessaire, tableaux avec en-têtes, légendes et source des données. Ne pas séparer un titre du paragraphe qui le suit.

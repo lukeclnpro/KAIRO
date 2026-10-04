@@ -6,6 +6,8 @@ import shutil
 import subprocess
 import platform
 
+import program_commands
+
 
 def _run(argv):
     if not shutil.which(argv[0]):
@@ -70,6 +72,50 @@ def _confirmation(action, package=None):
     }
 
 
+def _catalog_install_command(plan):
+    command = list(plan["command"])
+    manager = plan["manager"]
+    noninteractive_flags = {
+        "apt": ("install", "--assume-yes"),
+        "dnf": ("install", "--assumeyes"),
+        "pacman": ("-S", "--noconfirm"),
+        "zypper": ("install", "--non-interactive"),
+    }
+    option = noninteractive_flags.get(manager)
+    if option and option[0] in command and option[1] not in command:
+        command.insert(command.index(option[0]) + 1, option[1])
+    if command[0] == "sudo":
+        command.insert(1, "-n")
+    return command
+
+
+def _install_catalog_application(package, confirmed):
+    application = program_commands.find_catalog_program(package)
+    if application is None:
+        raise ValueError(f"Application absente du catalogue : {package}")
+    plan = program_commands.get_installation_plan(application["id"])
+    command = _catalog_install_command(plan)
+    requirements = list(plan.get("requires", []))
+    pending = {
+        "confirmation_required": True,
+        "action": "install_app",
+        "package": package,
+        "application": application["name"],
+        "command": command,
+        "requires": requirements,
+        "message": (
+            f"Confirmation nécessaire avant d'installer {application['name']} : "
+            f"{program_commands.format_command(command)}"
+            + ("\nPrérequis : " + ", ".join(requirements) if requirements else "")
+        ),
+    }
+    if not confirmed:
+        return pending
+    result = _run(command)
+    result["application"] = application["name"]
+    return result
+
+
 ACTION_ALIASES = {
     "increase": "up", "augmenter": "up", "monter": "up", "plus": "up",
     "decrease": "down", "diminuer": "down", "baisser": "down", "moins": "down",
@@ -95,10 +141,18 @@ def use(action, value=None, amount=5, confirmed=False):
         }
     if action in {"up", "down", "mute", "unmute"}:
         return volume(action, amount)
+    if action in {"install_app", "install_application"}:
+        package = str(value or "").strip()
+        if not package or any(char in package for char in "/;&|`$\n"):
+            raise ValueError("Nom d'application invalide.")
+        return _install_catalog_application(package, confirmed)
     if action == "install":
         package = str(value or "").strip()
         if not package or any(char in package for char in "/;&|`$\n"):
             raise ValueError("Nom de paquet invalide.")
+        application = program_commands.find_catalog_program(package)
+        if application:
+            return _install_catalog_application(application["name"], confirmed)
         pending = _confirmation(action, package)
         if not confirmed:
             return pending

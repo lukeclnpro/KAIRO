@@ -1,0 +1,15 @@
+OUTIL : create_download
+
+ROLE
+Crée un fichier texte dans fichiers_generes/, le garde dans le cache pour le GUI et le propose avec un bouton de téléchargement.
+
+PARAMETRES
+filename : nom de fichier seul, sans chemin.
+content : contenu texte complet à enregistrer en UTF-8.
+extension : extension facultative, ajoutée si le nom n'en a pas.
+
+EXEMPLE
+<tool_call>{"tool":"create_download","arguments":{"filename":"rapport","extension":"txt","content":"Résultat"}}</tool_call>
+
+REGLES
+Utiliser cet outil quand l'utilisateur veut récupérer ou télécharger le fichier. Le GUI demandera ensuite où l'enregistrer. Les noms déjà utilisés sont suffixés pour ne pas écraser les fichiers. Ne pas fournir de chemin d'accès au cache.

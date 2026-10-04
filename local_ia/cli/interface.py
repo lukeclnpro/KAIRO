@@ -218,12 +218,13 @@ def _local_code_instructions(project, command_enabled):
 
 def _local_code_proposal_instructions(project):
     return (
-        "MODE PROPOSITION LOCAL_CODE : analyse le projet en lecture seule. "
+        "MODE COMMANDE LOCAL_CODE : analyse le projet et prépare les modifications de fichiers nécessaires, "
+        "avec une commande write/edit par sous-tâche. "
         f"Projet : {project.name}\nRacine autorisée : {project}\n"
-        "Utilise file, list et search pour comprendre le code existant. Tu ne dois modifier, créer ni exécuter aucun fichier. "
-        "Réponds en français avec un résumé du diagnostic, un diff unifié concret dans un bloc ```diff, "
-        "et les tests que tu lanceras après approbation. Le diff doit utiliser des chemins relatifs à la racine. "
-        "Ne prétends pas que les changements sont déjà appliqués. Si aucun changement n'est nécessaire, explique-le clairement."
+        "Utilise file, list et search pour comprendre le code existant. Puis retourne uniquement un appel "
+        'un appel <tool_call> valide, avec tool="write" ou tool="edit", des arguments JSON et un chemin relatif à la racine. '
+        "Ne modifie aucun fichier avant approbation. N'ajoute ni diagnostic, ni diff, ni commentaire, ni texte autour de l'appel. "
+        "N'utilise pas command pour créer ou modifier un fichier."
     )
 
 
@@ -239,33 +240,26 @@ def _run_local_code_loop(
     respond=None,
 ):
     respond = respond or agent.respond
+    proposal_tools = {"file", "list", "search"} | ({"write", "edit"} & set(tools))
     proposal = respond(
         chat,
         request,
         external_info=_local_code_proposal_instructions(project),
-        allowed_tools=LOCAL_CODE_READ_TOOLS,
+        allowed_tools=proposal_tools,
         local_code=True,
+        defer_file_actions=True,
     )
     display("assistant", proposal)
     try:
-        approval = input_fn("Appliquer ce diff et lancer les vérifications autorisées ? [o/N] ").strip().casefold()
+        approval = input_fn("Appliquer ces modifications au projet ? [o/N] ").strip().casefold()
     except (EOFError, KeyboardInterrupt):
         approval = ""
     if approval not in {"o", "oui", "y", "yes"}:
         return "Proposition refusée ou annulée. Aucun fichier n'a été modifié."
 
-    approved_request = (
-        f"{request}\n\nProposition approuvée par l'utilisateur, à appliquer dans le projet :\n{proposal}"
-    )
-    instructions = _local_code_instructions(project, command_enabled="command" in tools)
-    instructions += "\nApplique uniquement la proposition approuvée, puis exécute les tests pertinents si la commande est autorisée."
-    return respond(
-        chat,
-        approved_request,
-        external_info=instructions,
-        allowed_tools=tools,
-        local_code=True,
-    )
+    result = agent.apply_approved_file_call(proposal, chat, allowed_tools=tools)
+    display("assistant", result)
+    return result
 
 
 def main():
@@ -421,6 +415,12 @@ def main():
 
 
 def _respond_with_status(agent, *args, **kwargs):
+    def show_progress(message):
+        text = ui.colorize(f"IA  {message}", ui.C.INFO)
+        sys.stdout.write("\r\033[2K" + text)
+        sys.stdout.flush()
+
+    kwargs["progress_callback"] = show_progress
     sys.stdout.write(ui.colorize("IA  Préparation en cours…", ui.C.INFO))
     sys.stdout.flush()
     try:
