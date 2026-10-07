@@ -55,7 +55,7 @@ class ContextCompiler:
                 sections.append(content)
         return sections
 
-    def select_memories(self, message, memories, limit=3):
+    def select_memories(self, message, memories, limit=2):
         if not memories:
             return []
         query_terms = _terms(message)
@@ -100,7 +100,11 @@ class ContextCompiler:
 
         course_sections = self.load_relevant_courses(message_text)
         if course_sections:
-            blocks.append(("COURS_DE_REFERENCE", "\n\n".join(course_sections)))
+            if re.search(r"\b(?:cours|apprendre|apprends|notions|fiche)\b", message_text.casefold()):
+                selected_sections = course_sections
+            else:
+                selected_sections = course_sections[:2]
+            blocks.append(("COURS_DE_REFERENCE", "\n\n".join(selected_sections)))
 
         summary = "" if code_mode else str(chat.get("summary") or "").strip()
         if summary:
@@ -108,9 +112,9 @@ class ContextCompiler:
 
         history = [] if code_mode else get_weighted_chat_history(chat)
         if history:
-            recent = history[-4:]
+            recent = history[-2:]
             recent_text = "\n".join(
-                f"{entry.get('role', 'user')}: {entry.get('content', '')}"
+                f"{entry.get('role', 'user')}: {str(entry.get('content', ''))[:260]}"
                 for entry in recent if str(entry.get('content', '')).strip()
             )
             if recent_text:

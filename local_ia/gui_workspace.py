@@ -35,8 +35,10 @@ from PySide6.QtWidgets import (
     QMessageBox as _QtMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSlider,
     QSplitter,
         QStackedWidget,
+    QSpinBox,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -47,11 +49,13 @@ from PySide6.QtWidgets import (
 )
 
 from local_ia.config.manager import (
+    effective_openrouter_power,
     load_config,
     model_config,
     openrouter_api_keys,
     openrouter_base_url,
     openrouter_model,
+    openrouter_power,
     save_config,
 )
 from local_ia import updater
@@ -88,6 +92,7 @@ LOCAL_CODE_TOOLS = frozenset({"file", "write", "edit", "list", "search", "calcul
 LOCAL_CODE_READ_TOOLS = frozenset({"file", "list", "search", "calculator"})
 MAX_PREVIEW_BYTES = 1_000_000
 MAX_SINGLE_FILE_AI_BYTES = 64_000
+MAX_OPENROUTER_KEYS_PER_CREATION = 10
 OPENROUTER_MODEL_PRESETS = (
     ("OpenAI · rapide et polyvalent", "openai/gpt-4o-mini"),
     ("Anthropic · code et raisonnement", "anthropic/claude-3.5-sonnet"),
@@ -110,10 +115,6 @@ def _exec_embedded_dialog(dialog, parent, object_name="embeddedDialog"):
     dialog.setWindowFlags(Qt.WindowType.Widget)
     dialog.setObjectName(object_name)
     dialog.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-    dialog.setStyleSheet(
-        "QDialog#embeddedDialog, QFileDialog#embeddedFileDialog { background: #1c2925; color: #e6efea; "
-        "border: 1px solid #456057; border-radius: 10px; }"
-    )
     dialog.adjustSize()
     bounds = backdrop.rect()
     width = min(max(dialog.width(), dialog.minimumWidth()), max(320, bounds.width() - 40))
@@ -963,13 +964,21 @@ class ApiKeyManagerDialog(QDialog):
         self.usage_button = QPushButton("Voir l’usage")
         self.add_button = QPushButton("Ajouter une clé")
         self.create_button = QPushButton("Créer via OpenRouter")
+        self.create_count = QSpinBox()
+        self.create_count.setRange(1, MAX_OPENROUTER_KEYS_PER_CREATION)
+        self.create_count.setValue(1)
+        count_row = QHBoxLayout()
+        count_row.addWidget(QLabel("Clés à créer"))
+        count_row.addWidget(self.create_count)
+        count_row.addStretch(1)
+        count_row.addWidget(self.create_button)
+        layout.addLayout(count_row)
         self.toggle_button = QPushButton("Désactiver")
         self.remove_button = QPushButton("Supprimer")
         self.close_button = QPushButton("Fermer")
         for button in (
             self.usage_button,
             self.add_button,
-            self.create_button,
             self.toggle_button,
             self.remove_button,
             self.close_button,
@@ -1139,14 +1148,27 @@ class AgentTask(QThread):
 
 
 class OpenRouterKeyTask(QThread):
-    completed = Signal(bool, str)
+    completed = Signal(bool, object)
     progress = Signal(str)
 
+    def __init__(self, count=1, parent=None):
+        super().__init__(parent)
+        self.count = max(1, min(int(count), MAX_OPENROUTER_KEYS_PER_CREATION))
+
     def run(self):
+        api_keys = []
+        for index in range(self.count):
+            self.progress.emit(f"Autorisation de la clé {index + 1}/{self.count} dans le navigateur…")
+            try:
+                api_keys.append(authorize_openrouter())
+            except Exception as error:
+                if api_keys:
+                    self.completed.emit(False, {"keys": api_keys, "error": str(error)})
+                else:
+                    self.completed.emit(False, str(error))
+                return
         try:
-            self.progress.emit("Ouverture d'OpenRouter dans le navigateur…")
-            api_key = authorize_openrouter()
-            self.completed.emit(True, api_key)
+            self.completed.emit(True, api_keys)
         except Exception as error:
             self.completed.emit(False, str(error))
 
@@ -1539,15 +1561,31 @@ class KairoWorkspace(QMainWindow):
         avatar_row.addStretch(1)
         signup_layout.addLayout(avatar_row)
 
+        self.signup_api_keys = []
         self.signup_api_key = QLineEdit()
         self.signup_api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self.signup_api_key.setPlaceholderText("Clé API OpenRouter")
         signup_layout.addWidget(self.signup_api_key)
+        key_creation_row = QHBoxLayout()
+        key_creation_row.addWidget(QLabel("Clés à créer"))
+        self.signup_key_count = QSpinBox()
+        self.signup_key_count.setRange(1, MAX_OPENROUTER_KEYS_PER_CREATION)
+        self.signup_key_count.setValue(1)
+        key_creation_row.addWidget(self.signup_key_count)
+        key_creation_row.addStretch(1)
+        signup_layout.addLayout(key_creation_row)
         authorize_button = QPushButton("Autoriser OpenRouter dans le navigateur")
         authorize_button.clicked.connect(
-            lambda: self._start_openrouter_key_creation(self.signup_api_key.setText)
+            lambda _checked=False: self._start_openrouter_key_creation(
+                self._remember_signup_api_keys,
+                self.signup_key_count.value(),
+            )
         )
         signup_layout.addWidget(authorize_button)
+        self.signup_key_status = QLabel("Chaque clé nécessite une autorisation OpenRouter.")
+        self.signup_key_status.setObjectName("mutedText")
+        self.signup_key_status.setWordWrap(True)
+        signup_layout.addWidget(self.signup_key_status)
         self.signup_error = QLabel("")
         self.signup_error.setObjectName("authError")
         self.signup_error.setWordWrap(True)
@@ -1627,18 +1665,34 @@ class KairoWorkspace(QMainWindow):
         email = self.signup_email.text().strip()
         password = self.signup_password.text()
         api_key = self.signup_api_key.text().strip()
-        if not all((username, email, password, api_key)):
+        api_keys = list(self.signup_api_keys)
+        if api_key and api_key not in api_keys:
+            api_keys.insert(0, api_key)
+        if not all((username, email, password)) or not api_keys:
             self.signup_error.setText("Complétez le nom, l’e-mail, le mot de passe et la clé OpenRouter.")
             return
         try:
             avatar = self._store_profile_avatar(username)
-            accounts.create_account(username, password, api_key, email=email, avatar=avatar)
+            accounts.create_account(username, password, api_keys, email=email, avatar=avatar)
             api_keys = accounts.authenticate_api_keys(username, password)
         except (OSError, ValueError) as error:
             self.signup_error.setText(str(error))
             return
         self.signup_error.clear()
         self._set_provider(username, api_keys, account_password=password)
+
+    def _remember_signup_api_keys(self, api_keys):
+        values = api_keys if isinstance(api_keys, list) else [api_keys]
+        self.signup_api_keys = list(dict.fromkeys(
+            self.signup_api_keys + [
+                str(value).strip() for value in values if str(value).strip()
+            ]
+        ))
+        if self.signup_api_keys:
+            self.signup_api_key.setText(self.signup_api_keys[0])
+            self.signup_key_status.setText(
+                f"{len(self.signup_api_keys)} clé{'s' if len(self.signup_api_keys) != 1 else ''} autorisée{'s' if len(self.signup_api_keys) != 1 else ''}."
+            )
 
     def _apply_mode(self, code_mode):
         self.code_mode_active = bool(code_mode)
@@ -1667,69 +1721,120 @@ class KairoWorkspace(QMainWindow):
 
     def _apply_style(self):
         style = """
-            QWidget#root { background: #10191b; color: #e6efea; }
-            QWidget#sidebar { background: #152326; border-right: 1px solid #2c3c3b; }
-            QWidget#mainPanel { background: #10191b; }
-            QLabel#brand { color: #b5efc8; font-size: 25px; font-weight: 800; }
-            QLabel#tagline, QLabel#sectionLabel { color: #82978d; font-size: 10px; font-weight: 800; }
-            QLabel#sectionLabel { margin-top: 7px; }
-            QLabel#pageTitle { color: #f1f5f1; font-size: 23px; font-weight: 700; }
-            QLabel#subtitle, QLabel#mutedText { color: #91a69c; font-size: 11px; }
-            QLabel#status { color: #b5efc8; background: #1e332a; border: 1px solid #3d5e49; border-radius: 9px; padding: 8px 12px; font-size: 11px; }
-            QComboBox#modelPicker { background: #192729; color: #dce9e1; border: 1px solid #3c554c; border-radius: 7px; padding: 8px 10px; min-width: 230px; }
-            QComboBox#modelPicker QAbstractItemView { background: #192729; color: #e1ebe5; selection-background-color: #355f4a; }
-            QLabel#notice { color: #9bb0a5; font-size: 11px; }
-            QListWidget#chatList, QTreeView#fileTree { background: #111d1f; color: #c8d8cf; border: 1px solid #2b3c39; border-radius: 7px; padding: 4px; }
-            QListWidget#chatList::item { padding: 8px; border-radius: 5px; }
-            QListWidget#chatList::item:selected { background: #264137; color: #e8fff0; }
-            QPlainTextEdit#transcript { background: #0c1416; color: #e1ebe5; border: 1px solid #2c403c; border-radius: 9px; padding: 16px; selection-background-color: #355f4a; }
-            QWidget#editorPanel { background: #121d1f; border: 1px solid #2b3c39; border-radius: 9px; }
-            QLabel#editorFileLabel { color: #cfe0d6; font-family: 'Noto Sans Mono'; font-size: 11px; }
-            QLabel#editorStatus { color: #82978d; font-size: 10px; }
-            QWidget#authPage { background: #10191b; }
-            QWidget#authPanel { background: #172426; border: 1px solid #344843; border-radius: 10px; }
+            QWidget { color: #e7eee9; font-family: 'Noto Sans'; font-size: 10pt; }
+            QWidget#root, QWidget#mainPanel, QWidget#authPage { background: #111714; }
+            QWidget#sidebar { background: #171f1b; border-right: 1px solid #29352e; }
+            QWidget#sidebar QWidget { background: transparent; }
+            QLabel#brand { color: #c2f0d1; font-size: 23px; font-weight: 800; }
+            QLabel#tagline { color: #91a59a; font-size: 9pt; font-weight: 700; }
+            QLabel#sectionLabel { color: #87988e; font-size: 8pt; font-weight: 800; margin-top: 7px; }
+            QLabel#pageTitle { color: #f2f5f2; font-size: 21pt; font-weight: 700; }
+            QLabel#subtitle, QLabel#mutedText, QLabel#notice, QLabel#editorStatus { color: #98a89f; }
+            QLabel#status { color: #c7efd3; background: #20372a; border: 1px solid #395b43; border-radius: 13px; padding: 7px 12px; font-size: 9pt; }
+            QComboBox, QLineEdit, QPlainTextEdit, QTextBrowser, QTableWidget {
+                background: #1a231e; color: #e7eee9; border: 1px solid #344138;
+                border-radius: 9px; padding: 8px 10px; selection-background-color: #477957;
+            }
+            QComboBox:hover, QLineEdit:hover { border-color: #607668; }
+            QComboBox:focus, QLineEdit:focus, QPlainTextEdit:focus { border: 1px solid #9bd6ad; }
+            QComboBox#modelPicker { min-width: 230px; padding: 9px 12px; font-weight: 600; }
+            QComboBox QAbstractItemView { background: #202a24; color: #e7eee9; border: 1px solid #3a4a3e; selection-background-color: #355940; padding: 5px; }
+            QListWidget#chatList, QTreeView#fileTree { background: #141c17; color: #d0d9d3; border: 1px solid #29362d; border-radius: 10px; padding: 5px; }
+            QListWidget#chatList::item { padding: 10px; border-radius: 7px; }
+            QListWidget#chatList::item:hover { background: #202c23; }
+            QListWidget#chatList::item:selected { background: #2b4934; color: #f1fff4; }
+            QPlainTextEdit#transcript { background: #141b17; border-color: #2d3931; border-radius: 12px; padding: 18px; line-height: 1.5; }
+            QWidget#editorPanel { background: #171f1b; border: 1px solid #2c3930; border-radius: 12px; }
+            QLabel#editorFileLabel { color: #d3e2d8; font-family: 'Noto Sans Mono'; font-size: 10pt; }
+            QWidget#authPanel { background: #19221d; border: 1px solid #344239; border-radius: 16px; }
             QLabel#authError { color: #ff9d8e; }
-            QLabel#avatarPreview { color: #dce9e1; background: #294238; border: 1px solid #557664; border-radius: 36px; font-size: 24px; }
-            QLabel#profileAvatar { color: #dce9e1; background: #294238; border: 1px solid #557664; border-radius: 19px; font-weight: 700; }
-            QPushButton#authPrimaryButton { color: #14261b; background: #a5e8b9; border-color: #b7f0c7; text-align: center; }
-            QPlainTextEdit#codeEditor { background: #0b1214; color: #dce9e1; border: 0; border-radius: 8px; padding: 14px; selection-background-color: #355f4a; }
-            QLineEdit#composer { background: #182628; color: #f0f6f2; border: 1px solid #3c554c; border-radius: 8px; padding: 14px; selection-background-color: #355f4a; }
-            QPushButton { color: #dce9e1; background: #20312e; border: 1px solid #365047; border-radius: 7px; padding: 11px 12px; font-weight: 700; text-align: left; }
-            QPushButton:hover { color: #f2fff6; background: #2a4538; border-color: #75bd91; }
-            QPushButton:pressed { background: #183027; padding-top: 13px; padding-bottom: 9px; }
-            QPushButton:checked { color: #10251a; background: #a6e8b9; border-color: #c6f5d2; }
-            QPushButton#connectButton { background: #264735; border-color: #5a936b; }
-            QPushButton#sendButton { color: #14261b; background: #a5e8b9; border-color: #b7f0c7; min-width: 110px; text-align: center; }
-            QPushButton#sendButton:hover { background: #c3f4ce; }
-            QPushButton#saveButton { color: #14261b; background: #a5e8b9; border-color: #b7f0c7; text-align: center; }
-            QPushButton:disabled { color: #697c73; background: #1a2524; border-color: #293633; }
+            QLabel#avatarPreview { color: #e5f3e9; background: #294333; border: 1px solid #55745d; border-radius: 36px; font-size: 24px; }
+            QLabel#profileAvatar { color: #e5f3e9; background: #294333; border: 1px solid #55745d; border-radius: 19px; font-weight: 700; }
+            QPlainTextEdit#codeEditor { background: #111714; border: 0; border-radius: 8px; padding: 14px; }
+            QLineEdit#composer { background: #202a24; border: 1px solid #46574b; border-radius: 12px; padding: 13px 15px; font-size: 11pt; }
+            QPushButton {
+                color: #e1e9e3; background: #222d26; border: 1px solid #3b4b3f;
+                border-radius: 9px; padding: 9px 13px; font-weight: 600; text-align: left;
+            }
+            QPushButton:hover { color: #f5fff7; background: #2d3c31; border-color: #6c9875; }
+            QPushButton:pressed { background: #1b2820; }
+            QPushButton:checked { color: #102016; background: #b9e9c6; border-color: #c9f4d4; }
+            QPushButton#connectButton { background: #274832; border-color: #527a5d; }
+            QPushButton#sendButton, QPushButton#saveButton, QPushButton#authPrimaryButton {
+                color: #102016; background: #b9e9c6; border-color: #c9f4d4; text-align: center; font-weight: 700;
+            }
+            QPushButton#sendButton { min-width: 110px; padding: 12px 16px; }
+            QPushButton#sendButton:hover, QPushButton#saveButton:hover, QPushButton#authPrimaryButton:hover { background: #d0f4d9; }
+            QPushButton:disabled { color: #748078; background: #1b231e; border-color: #2c3730; }
+            QCheckBox { spacing: 9px; }
+            QCheckBox::indicator { width: 17px; height: 17px; border: 1px solid #58675c; border-radius: 5px; background: #1a231e; }
+            QCheckBox::indicator:checked { background: #aaddb8; border-color: #aaddb8; }
+            QSlider::groove:horizontal { height: 6px; background: #344138; border-radius: 3px; }
+            QSlider::sub-page:horizontal { background: #a8dfb6; border-radius: 3px; }
+            QSlider::handle:horizontal { width: 18px; margin: -7px 0; border-radius: 9px; background: #d2f2da; border: 2px solid #6b9b77; }
+            QSlider::handle:horizontal:hover { background: #ffffff; }
+            QTabWidget::pane { border: 1px solid #303d34; border-radius: 10px; top: -1px; background: #171f1b; }
+            QTabBar::tab { color: #aab8af; background: transparent; padding: 10px 14px; border-bottom: 2px solid transparent; }
+            QTabBar::tab:selected { color: #d0f0d8; border-bottom-color: #a8dfb6; font-weight: 700; }
+            QTabBar::tab:hover { color: #f0f6f1; background: #202a24; }
+            QDialog#embeddedDialog, QDialog#embeddedInputDialog, QDialog#embeddedMessageDialog,
+            QFileDialog#embeddedFileDialog { background: #171f1b; color: #e7eee9; border: 1px solid #3a493e; border-radius: 14px; }
+            QWidget#settingsHeader { background: transparent; }
+            QLabel#settingsEyebrow { color: #a9d9b6; font-size: 8pt; font-weight: 800; }
+            QLabel#settingsTitle { color: #f2f5f2; font-size: 21pt; font-weight: 700; }
+            QLabel#settingsSubtitle, QLabel#settingsHint { color: #98a89f; }
+            QLabel#settingsSummary { color: #cbd7cf; background: #202a24; border: 1px solid #344138; border-radius: 10px; padding: 12px 14px; }
+            QWidget#powerCard { background: #202a24; border: 1px solid #3a493e; border-radius: 12px; }
+            QLabel#powerTitle { color: #edf4ef; font-size: 12pt; font-weight: 700; }
+            QLabel#powerValue { color: #c7efd3; font-size: 15pt; font-weight: 800; }
+            QLabel#powerScale { color: #87988e; font-size: 8pt; }
+            QDialogButtonBox { border-top: 1px solid #303d34; padding-top: 12px; }
+            QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
+            QScrollBar::handle:vertical { background: #46564a; min-height: 30px; border-radius: 5px; }
+            QScrollBar::handle:vertical:hover { background: #687f6d; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
         """
         if self.ui_settings.value("appearance/theme", "dark") == "light":
             style += """
-                QWidget#root { background: #eef3ef; color: #1d2b25; }
-                QWidget#sidebar { background: #dfe9e2; border-right: 1px solid #c4d3c9; }
-                QWidget#mainPanel { background: #eef3ef; }
-                QLabel#brand, QLabel#pageTitle { color: #173a2a; }
+                QWidget { color: #25352c; }
+                QWidget#root, QWidget#mainPanel, QWidget#authPage { background: #f1f4ef; }
+                QWidget#sidebar { background: #e8eee8; border-right-color: #d4ddd4; }
+                QLabel#brand { color: #28573a; }
                 QLabel#tagline, QLabel#sectionLabel, QLabel#subtitle, QLabel#mutedText,
-                QLabel#notice, QLabel#editorStatus { color: #53695d; }
-                QLabel#status { color: #245738; background: #d9eddf; border-color: #a5cbb0; }
-                QListWidget#chatList, QTreeView#fileTree { background: #f8fbf8; color: #263a2f; border-color: #cbd9ce; }
-                QListWidget#chatList::item:selected { background: #d2e8d8; color: #163d25; }
-                QPlainTextEdit#transcript { background: #fbfdfb; color: #25372d; border-color: #c9d8ce; }
-                QWidget#editorPanel { background: #f6faf6; border-color: #c9d8ce; }
-                QLabel#editorFileLabel { color: #2b4936; }
-                QWidget#authPage { background: #f3f8f4; }
-                QWidget#authPanel { background: #fbfdfb; border-color: #c9d8ce; }
-                QLabel#avatarPreview { color: #244030; background: #d2e8d8; border-color: #9bc2a4; }
-                QLabel#profileAvatar { color: #244030; background: #d2e8d8; border-color: #9bc2a4; }
-                QPlainTextEdit#codeEditor { background: #fbfdfb; color: #273a30; }
-                QLineEdit#composer { background: #fbfdfb; color: #23372b; border-color: #b9cdbf; }
-                QPushButton { color: #244030; background: #e0ebe2; border-color: #b9cdbf; }
-                QPushButton:hover { color: #173c27; background: #cee5d4; border-color: #79aa88; }
-                QPushButton:checked, QPushButton#sendButton, QPushButton#saveButton { color: #173722; background: #a5dcb4; border-color: #8bc69d; }
-                QPushButton#connectButton { background: #d0e8d6; border-color: #9bc2a4; }
-                QComboBox#modelPicker { background: #fbfdfb; color: #263a2f; border-color: #b9cdbf; }
-                QComboBox#modelPicker QAbstractItemView { background: #fbfdfb; color: #263a2f; selection-background-color: #d2e8d8; }
+                QLabel#notice, QLabel#editorStatus, QLabel#settingsSubtitle, QLabel#settingsHint,
+                QLabel#powerScale { color: #65766a; }
+                QLabel#pageTitle, QLabel#settingsTitle { color: #1e3326; }
+                QLabel#status { color: #28573a; background: #dcefe0; border-color: #b6d8bd; }
+                QComboBox, QLineEdit, QPlainTextEdit, QTextBrowser, QTableWidget { background: #fbfcf9; color: #26372c; border-color: #d2ddd3; }
+                QComboBox QAbstractItemView { background: #fbfcf9; color: #26372c; border-color: #d2ddd3; selection-background-color: #deefe2; }
+                QListWidget#chatList, QTreeView#fileTree { background: #f9fbf8; color: #2a3a30; border-color: #d6dfd6; }
+                QListWidget#chatList::item:hover { background: #eaf1ea; }
+                QListWidget#chatList::item:selected { background: #dcefe0; color: #20432c; }
+                QPlainTextEdit#transcript, QPlainTextEdit#codeEditor { background: #fbfcf9; color: #26372c; border-color: #d7e0d7; }
+                QWidget#editorPanel, QWidget#authPanel, QTabWidget::pane { background: #fbfcf9; border-color: #d7e0d7; }
+                QLabel#editorFileLabel { color: #2e4936; }
+                QLabel#avatarPreview, QLabel#profileAvatar { color: #28523a; background: #dcefe0; border-color: #b3d5ba; }
+                QLineEdit#composer { background: #ffffff; color: #23372b; border-color: #cbd8cd; }
+                QPushButton { color: #294334; background: #e7eee7; border-color: #cbd8cd; }
+                QPushButton:hover { color: #1e492d; background: #dceade; border-color: #8bb594; }
+                QPushButton:checked, QPushButton#sendButton, QPushButton#saveButton, QPushButton#authPrimaryButton { color: #173722; background: #a9ddb5; border-color: #91c99f; }
+                QPushButton#connectButton { background: #dcefe0; border-color: #b3d5ba; }
+                QTabBar::tab { color: #65766a; }
+                QTabBar::tab:selected { color: #28573a; border-bottom-color: #4e8b5d; }
+                QTabBar::tab:hover { color: #28573a; background: #edf3ed; }
+                QWidget#settingsHeader { background: transparent; }
+                QLabel#settingsEyebrow { color: #438154; }
+                QLabel#settingsSummary, QWidget#powerCard { color: #2b3b30; background: #f2f6f1; border-color: #d7e0d7; }
+                QLabel#powerTitle { color: #26372c; }
+                QLabel#powerValue { color: #347145; }
+                QSlider::groove:horizontal { background: #d5e0d6; }
+                QSlider::sub-page:horizontal { background: #62a773; }
+                QSlider::handle:horizontal { background: #fff; border-color: #559365; }
+                QDialog#embeddedDialog, QDialog#embeddedInputDialog, QDialog#embeddedMessageDialog,
+                QFileDialog#embeddedFileDialog { background: #fbfcf9; color: #25352c; border-color: #d2ddd3; }
+                QDialogButtonBox { border-top-color: #d7e0d7; }
+                QScrollBar::handle:vertical { background: #c2d0c4; }
+                QScrollBar::handle:vertical:hover { background: #93ae98; }
             """
         self.setStyleSheet(style)
 
@@ -1739,13 +1844,34 @@ class KairoWorkspace(QMainWindow):
     def _open_settings(self, initial_tab=None):
         dialog = QDialog(self)
         dialog.setWindowTitle("Paramètres KAIRO")
-        dialog.setMinimumWidth(510)
+        dialog.setMinimumWidth(620)
         layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(26, 22, 26, 20)
+        layout.setSpacing(16)
+        settings_header = QWidget()
+        settings_header.setObjectName("settingsHeader")
+        header_layout = QVBoxLayout(settings_header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(3)
+        eyebrow = QLabel("KAIRO  /  PRÉFÉRENCES")
+        eyebrow.setObjectName("settingsEyebrow")
+        heading = QLabel("Paramètres")
+        heading.setObjectName("settingsTitle")
+        subtitle = QLabel("Personnalisez votre espace et le comportement de l’assistant.")
+        subtitle.setObjectName("settingsSubtitle")
+        header_layout.addWidget(eyebrow)
+        header_layout.addWidget(heading)
+        header_layout.addWidget(subtitle)
+        layout.addWidget(settings_header)
         tabs = QTabWidget()
+        tabs.setObjectName("settingsTabs")
         layout.addWidget(tabs)
 
         appearance = QWidget()
+        appearance.setObjectName("settingsPage")
         appearance_form = QFormLayout(appearance)
+        appearance_form.setContentsMargins(20, 20, 20, 20)
+        appearance_form.setVerticalSpacing(16)
         theme_picker = QComboBox()
         theme_picker.addItem("Sombre", "dark")
         theme_picker.addItem("Clair", "light")
@@ -1756,15 +1882,62 @@ class KairoWorkspace(QMainWindow):
 
         account_page = QWidget()
         account_layout = QVBoxLayout(account_page)
+        account_layout.setContentsMargins(20, 18, 20, 20)
+        account_layout.setSpacing(14)
         account_name = os.environ.get("LOCAL_IA_ACCOUNT", "")
         account_keys = openrouter_api_keys()
         account_info = QLabel(
-            f"Compte : {account_name or 'non connecté'}\n"
-            f"Fournisseur : {'OpenRouter' if account_keys else 'aucun'}\n"
-            f"Clés chargées : {len(account_keys)}"
+            f"{account_name or 'Aucun compte connecté'}  ·  "
+            f"{'OpenRouter' if account_keys else 'Aucun fournisseur'}  ·  "
+            f"{len(account_keys)} clé{'s' if len(account_keys) != 1 else ''} active{'s' if len(account_keys) != 1 else ''}"
         )
+        account_info.setObjectName("settingsSummary")
         account_info.setWordWrap(True)
         account_layout.addWidget(account_info)
+
+        current_power = openrouter_power()
+        power_card = QWidget()
+        power_card.setObjectName("powerCard")
+        power_layout = QVBoxLayout(power_card)
+        power_layout.setContentsMargins(18, 16, 18, 14)
+        power_layout.setSpacing(10)
+        power_heading = QHBoxLayout()
+        power_title = QLabel("Puissance IA")
+        power_title.setObjectName("powerTitle")
+        power_label = QLabel()
+        power_label.setObjectName("powerValue")
+        power_slider = QSlider(Qt.Orientation.Horizontal)
+        power_slider.setObjectName("powerSlider")
+        power_slider.setRange(1, 100)
+        power_slider.setValue(current_power)
+        power_slider.setToolTip("Choisissez la part des clés actives que KAIRO peut utiliser.")
+        power_heading.addWidget(power_title)
+        power_heading.addStretch(1)
+        power_heading.addWidget(power_label)
+        power_layout.addLayout(power_heading)
+        power_hint = QLabel("La puissance maximale dépend du nombre de clés OpenRouter actives.")
+        power_hint.setObjectName("settingsHint")
+        power_hint.setWordWrap(True)
+        power_layout.addWidget(power_hint)
+        power_layout.addWidget(power_slider)
+        power_scale = QHBoxLayout()
+        power_minimum = QLabel("1x  ·  minimum")
+        power_minimum.setObjectName("powerScale")
+        power_maximum = QLabel(f"{max(1, len(account_keys))}x  ·  maximum")
+        power_maximum.setObjectName("powerScale")
+        power_scale.addWidget(power_minimum)
+        power_scale.addStretch(1)
+        power_scale.addWidget(power_maximum)
+        power_layout.addLayout(power_scale)
+        account_layout.addWidget(power_card)
+
+        def sync_power_label(value):
+            effective_x = effective_openrouter_power(account_keys or ["demo"], power=value)
+            power_label.setText(f"{effective_x}x  ·  {value}%")
+
+        power_slider.valueChanged.connect(sync_power_label)
+        sync_power_label(current_power)
+
         account_actions = QHBoxLayout()
         connect_button = QPushButton("Connexion / création")
 
@@ -1776,7 +1949,12 @@ class KairoWorkspace(QMainWindow):
         manage_button = QPushButton("Gérer les clés API")
         manage_button.clicked.connect(self._manage_api_keys)
         disconnect_button = QPushButton("Déconnexion")
-        disconnect_button.clicked.connect(self._disconnect_account)
+
+        def disconnect_account():
+            dialog.accept()
+            self._disconnect_account()
+
+        disconnect_button.clicked.connect(disconnect_account)
         account_actions.addWidget(connect_button)
         account_actions.addWidget(manage_button)
         account_actions.addWidget(disconnect_button)
@@ -1786,6 +1964,8 @@ class KairoWorkspace(QMainWindow):
 
         data_page = QWidget()
         data_layout = QVBoxLayout(data_page)
+        data_layout.setContentsMargins(20, 20, 20, 20)
+        data_layout.setSpacing(12)
         data_note = QLabel("Ces actions suppriment des données partagées avec le terminal.")
         data_note.setWordWrap(True)
         data_layout.addWidget(data_note)
@@ -1803,6 +1983,8 @@ class KairoWorkspace(QMainWindow):
 
         notifications = QWidget()
         notification_layout = QVBoxLayout(notifications)
+        notification_layout.setContentsMargins(20, 20, 20, 20)
+        notification_layout.setSpacing(12)
         sound_enabled = QCheckBox("Son à la fin d’une réponse")
         sound_enabled.setChecked(self.ui_settings.value("notifications/sound", True, type=bool))
         notification_layout.addWidget(sound_enabled)
@@ -1814,6 +1996,8 @@ class KairoWorkspace(QMainWindow):
 
         update_page = QWidget()
         update_layout = QVBoxLayout(update_page)
+        update_layout.setContentsMargins(20, 20, 20, 20)
+        update_layout.setSpacing(12)
         update_note = QLabel(
             "Télécharge les fichiers de l’application depuis GitHub sans remplacer vos données ni vos fichiers personnels."
         )
@@ -1833,6 +2017,8 @@ class KairoWorkspace(QMainWindow):
 
         tools_page = QWidget()
         tools_layout = QVBoxLayout(tools_page)
+        tools_layout.setContentsMargins(20, 20, 20, 20)
+        tools_layout.setSpacing(10)
         manage_keys = QPushButton("Gérer les clés API")
         manage_keys.clicked.connect(self._manage_api_keys)
         open_terminal = QPushButton("Ouvrir le terminal")
@@ -1858,6 +2044,10 @@ class KairoWorkspace(QMainWindow):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.ui_settings.setValue("appearance/theme", theme_picker.currentData())
             self.ui_settings.setValue("notifications/sound", sound_enabled.isChecked())
+            config = load_config()
+            config.setdefault("openrouter", {})
+            config["openrouter"]["power"] = power_slider.value()
+            save_config(config)
             self._apply_style()
 
     def _start_git_update(self, button=None):
@@ -2160,12 +2350,26 @@ class KairoWorkspace(QMainWindow):
             except (OSError, ValueError) as error:
                 QMessageBox.warning(dialog, "Ajout impossible", str(error))
 
-        def add_openrouter_key(api_key):
+        def add_openrouter_keys(api_keys):
+            values = api_keys if isinstance(api_keys, list) else [api_keys]
+            existing_keys = {
+                record["key"]
+                for record in accounts.authenticate_api_key_records(username, password)
+            }
+            added = 0
             try:
-                accounts.add_api_key(username, password, api_key)
-                refresh_keys()
+                for api_key in values:
+                    key = str(api_key).strip()
+                    if key and key not in existing_keys:
+                        accounts.add_api_key(username, password, key)
+                        existing_keys.add(key)
+                        added += 1
             except (OSError, ValueError) as error:
+                refresh_keys()
                 QMessageBox.warning(dialog, "Ajout impossible", str(error))
+                return
+            refresh_keys()
+            self.notice.setText(f"{added} clé{'s' if added != 1 else ''} OpenRouter ajoutée{'s' if added != 1 else ''}.")
 
         def remove_key():
             record = dialog.selected_record()
@@ -2221,17 +2425,20 @@ class KairoWorkspace(QMainWindow):
 
         dialog.add_button.clicked.connect(add_key)
         dialog.create_button.clicked.connect(
-            lambda: self._start_openrouter_key_creation(add_openrouter_key)
+            lambda _checked=False: self._start_openrouter_key_creation(
+                add_openrouter_keys,
+                dialog.create_count.value(),
+            )
         )
         dialog.remove_button.clicked.connect(remove_key)
         dialog.toggle_button.clicked.connect(toggle_key)
         dialog.usage_button.clicked.connect(show_usage)
         dialog.exec()
 
-    def _start_openrouter_key_creation(self, on_key_created):
+    def _start_openrouter_key_creation(self, on_key_created, count=1):
         if self.oauth_task and self.oauth_task.isRunning():
             return
-        task = OpenRouterKeyTask(self)
+        task = OpenRouterKeyTask(count, self)
         self.oauth_task = task
         task.progress.connect(self.notice.setText)
         task.completed.connect(
@@ -2246,7 +2453,19 @@ class KairoWorkspace(QMainWindow):
         self.oauth_task = None
         if not success:
             self.notice.setText("Création de clé OpenRouter interrompue.")
-            QMessageBox.warning(self, "Connexion OpenRouter impossible", result)
+            if isinstance(result, dict):
+                api_keys = result.get("keys", [])
+                if api_keys:
+                    try:
+                        on_key_created(api_keys)
+                    except Exception as error:
+                        QMessageBox.warning(self, "Enregistrement impossible", str(error))
+                error_message = result.get("error", "Autorisation interrompue.")
+                if api_keys:
+                    error_message = f"{len(api_keys)} clé(s) obtenue(s) avant l’interruption.\n{error_message}"
+            else:
+                error_message = str(result)
+            QMessageBox.warning(self, "Connexion OpenRouter impossible", error_message)
             return
         try:
             on_key_created(result)

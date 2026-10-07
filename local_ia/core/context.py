@@ -30,13 +30,24 @@ def load_context(path: Path | None = None) -> dict:
     return result
 
 
+def _compact_prompt_block(lines, limit=4):
+    items = [str(item).strip() for item in lines if str(item).strip()]
+    selected = items[:limit]
+    compact = "\n".join(f"- {item[:220]}" for item in selected if item)
+    return compact or "Aucune information."
+
+
 def build_system_prompt(memories, topic, context, external_info=None) -> str:
     language = str(context.get("langue", "français")).strip() or "français"
     instructions = context.get("instructions", [])
     if isinstance(instructions, list):
-        instructions = "\n".join(f"- {item}" for item in instructions if str(item).strip())
-    instructions = str(instructions).strip() or "Aucune instruction spécifique."
-    memory_text = "\n".join(f"- {item}" for item in memories) or "Aucune mémoire enregistrée."
+        instructions = _compact_prompt_block(instructions, limit=3)
+    else:
+        instructions = str(instructions).strip() or "Aucune instruction spécifique."
+        instructions = instructions[:500]
+    memories = list(memories)[:2]
+    memory_text = "\n".join(f"- {str(item)[:220]}" for item in memories if str(item).strip()) or "Aucune mémoire enregistrée."
+    external_summary = str(external_info or "Aucune information externe utilisée.").strip()[:500]
     return f"""Tu es {context.get('role', DEFAULT_CONTEXT['role'])}.
 
 Langue obligatoire : {language}
@@ -52,14 +63,12 @@ Mémoire utilisateur :
 {memory_text}
 
 Informations externes :
-{external_info or 'Aucune information externe utilisée.'}
+{external_summary}
 
-Règles de réponse :
-- Réponds d'abord à la demande précise, avec les éléments nécessaires mais sans répétition.
-- Traite chaque sous-question; si une information manque ou reste incertaine, dis-le clairement.
-- Pour une demande d'information, donne une réponse compréhensible et distingue les faits des hypothèses.
-- Pour une action, utilise les outils disponibles et n'annonce jamais un résultat qui n'a pas été vérifié.
-- Pose une seule question ciblée uniquement si une donnée indispensable empêche de continuer.
+Règles :
+- Réponds d'abord au besoin réel, sans répétition.
+- Si une donnée manque, dis-le clairement.
+- Utilise les outils seulement quand c'est nécessaire.
+- N'invente jamais une information.
 
-Réponds uniquement en {language}. Utilise l'historique et la mémoire
-uniquement lorsqu'ils sont pertinents. N'invente aucune information."""
+Réponds uniquement en {language}."""

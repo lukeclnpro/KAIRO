@@ -9,7 +9,7 @@ import json
 import os
 import getpass
 from local_ia.http_client import Request, open_url as urlopen
-from urllib.error import URLError, HTTPError
+from urllib.error import URLError
 
 import ui
 import program_commands
@@ -148,6 +148,24 @@ def resolve_runtime_provider():
     return "local"
 
 
+def clear_session_environment():
+    """Supprime les variables de session liées au fournisseur actif."""
+    for variable in (
+        "LOCAL_IA_PROVIDER",
+        "LOCAL_IA_OPENROUTER_KEY",
+        "LOCAL_IA_OPENROUTER_KEYS",
+        "LOCAL_IA_ACCOUNT",
+    ):
+        os.environ.pop(variable, None)
+
+
+def activate_openrouter_session(username, api_keys):
+    """Active une session OpenRouter et mémorise la clé de runtime."""
+    os.environ["LOCAL_IA_ACCOUNT"] = username
+    os.environ["LOCAL_IA_PROVIDER"] = "openrouter"
+    set_openrouter_session_keys(api_keys)
+
+
 def select_runtime_provider():
     """Affiche le choix initial de compte ou de fournisseur local."""
     try:
@@ -156,9 +174,7 @@ def select_runtime_provider():
         saved_session = None
     if saved_session:
         username, api_keys = saved_session
-        os.environ["LOCAL_IA_ACCOUNT"] = username
-        os.environ["LOCAL_IA_PROVIDER"] = "openrouter"
-        set_openrouter_session_keys(api_keys)
+        activate_openrouter_session(username, api_keys)
         return "openrouter"
 
     while True:
@@ -182,16 +198,16 @@ def select_runtime_provider():
         if choice == "1":
             api_keys = login_openrouter_account()
             if api_keys:
-                os.environ["LOCAL_IA_PROVIDER"] = "openrouter"
-                set_openrouter_session_keys(api_keys)
+                username = os.environ.get("LOCAL_IA_ACCOUNT", "").strip()
+                activate_openrouter_session(username, api_keys)
                 return "openrouter"
             continue
 
         if choice == "2":
             api_keys = create_openrouter_account()
             if api_keys:
-                os.environ["LOCAL_IA_PROVIDER"] = "openrouter"
-                set_openrouter_session_keys(api_keys)
+                username = os.environ.get("LOCAL_IA_ACCOUNT", "").strip()
+                activate_openrouter_session(username, api_keys)
                 return "openrouter"
             continue
 
@@ -200,13 +216,7 @@ def select_runtime_provider():
                 accounts.clear_saved_session()
             except Exception:
                 ui.print_info("La session mémorisée n'a pas pu être effacée du trousseau système.")
-            for variable in (
-                "LOCAL_IA_PROVIDER",
-                "LOCAL_IA_OPENROUTER_KEY",
-                "LOCAL_IA_OPENROUTER_KEYS",
-                "LOCAL_IA_ACCOUNT",
-            ):
-                os.environ.pop(variable, None)
+            clear_session_environment()
             return "local"
 
         ui.print_error("Choix invalide.")
@@ -393,15 +403,15 @@ def manage_local_accounts():
     if choice == "1":
         api_keys = login_openrouter_account()
         if api_keys:
-            os.environ["LOCAL_IA_PROVIDER"] = "openrouter"
-            set_openrouter_session_keys(api_keys)
+            username = os.environ.get("LOCAL_IA_ACCOUNT", "").strip()
+            activate_openrouter_session(username, api_keys)
         return
 
     if choice == "2":
         api_keys = create_openrouter_account()
         if api_keys:
-            os.environ["LOCAL_IA_PROVIDER"] = "openrouter"
-            set_openrouter_session_keys(api_keys)
+            username = os.environ.get("LOCAL_IA_ACCOUNT", "").strip()
+            activate_openrouter_session(username, api_keys)
         return
 
     if choice == "4":
@@ -423,8 +433,7 @@ def manage_local_accounts():
             pause()
             return
         if username.casefold() == os.environ.get("LOCAL_IA_ACCOUNT", "").casefold():
-            for variable in ("LOCAL_IA_ACCOUNT", "LOCAL_IA_OPENROUTER_KEY", "LOCAL_IA_OPENROUTER_KEYS", "LOCAL_IA_PROVIDER"):
-                os.environ.pop(variable, None)
+            clear_session_environment()
         ui.print_ok("Compte local supprimé.")
         pause()
 

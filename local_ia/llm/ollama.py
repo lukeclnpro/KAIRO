@@ -17,7 +17,7 @@ from local_ia.config.manager import (
 )
 
 DEFAULT_KEEP_ALIVE = "30m"
-MAX_CONTEXT_TOKENS = 1200
+MAX_CONTEXT_TOKENS = 800
 MAX_RESPONSE_TOKENS = 256
 FALLBACK_OPENROUTER_MODEL = "openai/gpt-4o-mini"
 _REQUEST_QUEUE_LOCK = threading.Lock()
@@ -159,10 +159,13 @@ def _normalize_message_content(content):
                 text = str(item).strip()
                 if text:
                     parts.append(text)
-        return "\n".join(part for part in parts if part)
+        text = "\n".join(part for part in parts if part)
+        return text[:6000]
     if isinstance(content, dict):
-        return json.dumps(content, ensure_ascii=False, default=str).strip()
-    return str(content).strip()
+        text = json.dumps(content, ensure_ascii=False, default=str).strip()
+        return text[:6000]
+    text = str(content).strip()
+    return text[:6000]
 
 
 def _normalize_openrouter_messages(messages):
@@ -182,7 +185,7 @@ def _normalize_openrouter_messages(messages):
         content = _normalize_message_content(message.get("content"))
         if not content.strip():
             continue
-        normalized.append({"role": role, "content": content[:12000]})
+        normalized.append({"role": role, "content": content[:6000]})
 
     if not normalized:
         return [{"role": "user", "content": "Bonjour"}]

@@ -20,7 +20,7 @@ from pathlib import Path
 import application_launcher
 import command_commands
 import program_commands
-from local_ia.config.manager import model_config, openrouter_api_keys
+from local_ia.config.manager import model_config, openrouter_api_keys, openrouter_power
 from local_ia.core.context import load_context
 from local_ia.core.context_compiler import ContextCompiler
 from local_ia.core.conversation import get_weighted_chat_history
@@ -147,8 +147,14 @@ _VOLUME_RULES = (
 
 
 class RequestKeySequence:
-    def __init__(self, keys):
+    def __init__(self, keys, power=None):
         self.keys = tuple(str(key).strip() for key in keys if str(key).strip())
+        selected_power = openrouter_power() if power is None else power
+        if self.keys:
+            usable_keys = max(1, min(len(self.keys), int(round(len(self.keys) * (int(selected_power) / 100.0)))))
+            self.keys = self.keys[:usable_keys]
+        else:
+            self.keys = ()
         self.index = 0
 
     def key_for_stage(self, stage):

@@ -1,5 +1,5 @@
 {
-    "model": "llama3.2:3b",
+    "model": "deepseek-r1:14b",
     "ollama": {
         "url": "http://localhost:11434",
         "model": "",
@@ -12,7 +12,8 @@
         "base_url": "https://openrouter.ai/api/v1",
         "timeout": 120,
         "site_url": "",
-        "app_name": "Local IA"
+        "app_name": "Local IA",
+        "power": 100
     },
     "utilisateur": {
         "langue": "français",

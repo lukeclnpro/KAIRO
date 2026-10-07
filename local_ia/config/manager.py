@@ -29,6 +29,7 @@ DEFAULT_CONFIG = {
         "timeout": 120,
         "site_url": "",
         "app_name": "Local IA",
+        "power": 100,
     },
 }
 
@@ -130,6 +131,51 @@ def openrouter_model(config: dict | None = None) -> str:
     # quand l'appel est destiné à OpenRouter. L'API OpenRouter exige un
     # identifiant de modèle OpenRouter, pas un nom Ollama.
     return str(DEFAULT_CONFIG["openrouter"]["model"]).strip()
+
+
+def _normalize_ai_power(value, default=100) -> int:
+    try:
+        power = int(float(str(value).strip()))
+    except (TypeError, ValueError):
+        return default
+    if power < 1:
+        return 1
+    if power > 100:
+        return 100
+    return power
+
+
+def openrouter_power(config: dict | None = None) -> int:
+    data = config if config is not None else load_config()
+    nested = data.get("openrouter", {}) if isinstance(data, dict) else {}
+
+    for candidate in (
+        data.get("ia_power"),
+        data.get("ai_power"),
+        data.get("puissance_ia"),
+        data.get("puissance"),
+        data.get("power"),
+        nested.get("ia_power"),
+        nested.get("ai_power"),
+        nested.get("puissance_ia"),
+        nested.get("puissance"),
+        nested.get("power"),
+    ):
+        if candidate is not None:
+            return _normalize_ai_power(candidate, 100)
+    return 100
+
+
+def effective_openrouter_power(keys: list[str] | tuple[str, ...] | None = None, power: int | str | None = None, config: dict | None = None) -> int:
+    values = list(keys) if keys is not None else openrouter_api_keys()
+    if not values:
+        return 0
+
+    value = _normalize_ai_power(power if power is not None else openrouter_power(config), 100)
+    max_keys = len(values)
+    if max_keys <= 1:
+        return 1
+    return max(1, min(max_keys, int(round(max_keys * (value / 100.0)))))
 
 
 def openrouter_base_url(config: dict | None = None) -> str:

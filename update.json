@@ -243,6 +243,18 @@
                 "Ajout de réglages persistants pour le thème et le son des notifications, ainsi que de la sélection de modèles prédéfinis.",
                 "Renforcement des contrôles des outils et de l'exécution Python, avec permissions par projet et exécution réservée aux fichiers Python du projet."
             ]
+        },
+        {
+            "version": "0.2.0.15(beta15)",
+            "date": "2026-10-07",
+            "title": "Interface modernisée, puissance IA et clés multiples (beta15)",
+            "changes": [
+                "Réduction du volume des requêtes IA grâce à un contexte plus compact, avec limitation des messages, de l'historique, des souvenirs et des cours transmis au modèle.",
+                "Ajout d'un réglage de puissance IA dans les paramètres, ajustable par jauge et adapté au nombre de clés OpenRouter actives.",
+                "Ajout du choix du nombre de clés OpenRouter à créer, de 1 à 10, à l'inscription et dans le gestionnaire de clés; chaque clé nécessite sa propre autorisation.",
+                "Modernisation de l'interface graphique et des paramètres, avec des thèmes sombre et clair harmonisés et des contrôles retravaillés.",
+                "Correction de la déconnexion depuis les paramètres : la fenêtre se ferme pour laisser la page de connexion visible."
+            ]
         }
     ]
 }
