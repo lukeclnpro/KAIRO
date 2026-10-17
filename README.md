@@ -1,6 +1,6 @@
 # KAIRO
 
-**Assistant personnel avec modèles locaux ou OpenRouter.** Version actuelle : **0.2.0.21 (bêta 21)**.
+**Assistant personnel avec modèles locaux ou OpenRouter.** Version actuelle : **0.2.0.22 (bêta 22, prébuild 1)**.
 
 ## Installer KAIRO sur Windows
 
@@ -10,6 +10,8 @@ La méthode recommandée est l’installateur Windows. Python n’est pas néces
 2. Dans les fichiers de la version souhaitée, téléchargez `KAIRO-Setup-<version>.exe`.
 3. Lancez le fichier téléchargé et choisissez le dossier d’installation. Le chemin proposé par défaut est `%LOCALAPPDATA%\Programs\KAIRO`.
 4. À la fin, démarrez KAIRO depuis le menu Démarrer ou le raccourci créé par l’installateur.
+
+L’installateur estime l’espace nécessaire, affiche l’espace libre sur le disque choisi et actualise cette indication si vous changez le dossier ou l’option d’installation des sources.
 
 Le programme installé s’ouvre dans son interface graphique. Gardez l’ensemble du dossier d’installation : l’exécutable s’appuie sur les fichiers qui l’accompagnent.
 

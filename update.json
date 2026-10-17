@@ -333,7 +333,19 @@
                 "Ajout d'un build de l'application KAIRO portable avec son runtime Python intégré; le démarrage ne nécessite pas d'installation Python.",
                 "Ajout dans les Paramètres d'une section Applications affichant les applications détectées et les entrées enregistrées pour le lancement par nom.",
                 "Possibilité d'ajouter une application depuis son fichier ou son dossier et de la retirer du registre de lancement automatique.",
-                "L'aide de l'application compilée présente désormais le lancement par exécutable au lieu des commandes Python."
+                "L'aide de l'application compilée présente désormais le lancement par exécutable au lieu des commandes Python.",
+                "iahelp est spécialisé dans les commandes terminal Linux, Windows et macOS et répond uniquement avec la ou les commandes demandées, sans explication ni mise en forme."
+            ]
+        },
+        {
+            "version": "0.2.0.22(beta22-prebuild1)",
+            "date": "2026-10-17",
+            "title": "Prébuild 1 — stockage installateur et préparation publique (beta22)",
+            "changes": [
+                "L’installateur estime l’espace d’installation requis, le compare à l’espace libre du disque cible et actualise la jauge selon le dossier et les options choisies.",
+                "clean_public peut convertir le dossier de développement sur place en version publique après aperçu et confirmation, en conservant uniquement la liste blanche définie.",
+                "Réécriture du README avec l’installateur Windows comme parcours principal et l’installation Python depuis GitHub en alternative.",
+                "Ajout d’un rapport des bugs et risques à corriger, avec les problèmes confirmés séparés des anomalies non reproduites."
             ]
         }
     ]
