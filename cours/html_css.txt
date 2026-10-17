@@ -1,0 +1,16 @@
+HTML ET CSS — FICHE DE RÉFÉRENCE
+
+HTML décrit la structure et le sens du contenu; CSS contrôle sa présentation. Utiliser les éléments sémantiques (header, nav, main, section, article, footer), un seul h1 descriptif, des titres hiérarchisés et des labels associés aux champs.
+
+Document minimal : <!doctype html>, <html lang="fr">, <head> avec charset UTF-8 et viewport, puis <body>. Charger une feuille avec <link rel="stylesheet" href="style.css">.
+
+CSS : sélecteur { propriété: valeur; }. La cascade dépend de l'origine, de la spécificité puis de l'ordre. Préférer classes réutilisables aux styles inline et aux sélecteurs trop spécifiques. Utiliser box-sizing: border-box.
+
+Mise en page : Flexbox pour aligner une dimension; Grid pour lignes et colonnes. Utiliser gap, max-width, minmax(), fractions et dimensions flexibles plutôt que positionner chaque élément en absolu.
+
+Responsive : concevoir d'abord pour petit écran; ajouter @media (min-width: ...). Éviter les largeurs fixes. Les images doivent avoir max-width: 100%; height: auto. Tester au clavier et à différentes largeurs.
+
+Accessibilité : contraste suffisant, focus visible, boutons pour les actions, liens pour naviguer, texte alternatif utile pour les images informatives. Ne pas transmettre une information uniquement par la couleur.
+
+Exemple :
+.container { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 1rem; }

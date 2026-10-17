@@ -1,0 +1,11 @@
+GIT — FICHE DE RÉFÉRENCE
+
+Git enregistre des instantanés du projet. git status montre les changements; git diff les détaille; git log --oneline affiche l'historique.
+
+Flux courant : git add fichier sélectionne les changements; git diff --staged les vérifie; git commit -m "message clair" les enregistre. Ne pas ajouter de secrets, mots de passe, clés ou fichiers générés.
+
+Branches : git switch -c sujet crée et ouvre une branche; git switch nom change de branche; git merge branche intègre son historique. Résoudre les conflits dans les fichiers, puis vérifier et tester avant commit.
+
+Annuler prudemment : git restore --staged fichier retire de l'index; git restore fichier abandonne les modifications locales de ce fichier. Cette dernière action détruit le travail non enregistré : inspecter git diff avant. Éviter reset --hard si des changements peuvent être utiles.
+
+Un .gitignore exclut caches, environnements virtuels, secrets et artefacts locaux. Un commit doit rester petit, cohérent et vérifiable.

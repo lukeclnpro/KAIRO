@@ -1,0 +1,340 @@
+{
+    "versions": [
+        {
+            "version": "0.1.2",
+            "date": "2026-09-21",
+            "title": "Première version publique",
+            "changes": [
+                "Ajout du système de gestion des modèles Ollama.",
+                "Ajout du lancement de l'IA locale.",
+                "Ajout de la gestion des conversations.",
+                "Ajout de la configuration de l'IA."
+            ]
+        },
+        {
+            "version": "0.1.3",
+            "date": "2026-09-22",
+            "title": "0.1.3",
+            "changes": [
+                "Ajout d'une exception pour les fichier update.json et version.json lors du telechargement de la mise a jour",
+                "Fichier concerné : main.py"
+            ]
+        },
+        {
+            "version": "0.1.4",
+            "date": "2026-09-22",
+            "title": "0.1.4",
+            "changes": [
+                "Resolution du bug d'affichage des versions dans le journal de mise a jour",
+                "Fichier concerné : main.py"
+            ]
+        },
+        {
+            "version": "0.1.5",
+            "date": "2026-09-23",
+            "title": "serveur web",
+            "changes": [
+                "Ajout d'un serveur local qui permet a tout les membres du reseau de discuter avec l'ia.",
+                "Correctif des premiers bug et test du server local",
+                "debut de la creation d'un portage executable du programme",
+                "IMPORTANT : un possible bug du programme sur le serveur est possible pour les personnes ayant deja telecharger les anciennes version du programme, nous vous conseillons donc de supprimer le programme et de refaire une installation propre depuis le depot github (https://github.com/lukeclnpro/local_ia)"
+            ]
+        },
+        {
+            "version": "0.1.6",
+            "date": "2026-09-23",
+            "title": "script de desinstallation",
+            "changes": [
+                "Ajout d'un script de desinstallation de local-ai, et au choix, ollama et ses modeles.",
+                "Ajout de deux nouveau argument de commande pour main.py --> ''help'' qui affiche une aide sur les commande possible ; ''force_update'' qui force la mise a jour depuis le depot github"
+            ]
+        },
+        {
+            "version": "0.1.7",
+            "date": "2026-09-23",
+            "title": "interface plein écran globale",
+            "changes": [
+                "Chaque commande interactive démarre sur un écran entièrement nettoyé.",
+                "Les anciens messages, prompts et menus ne restent plus empilés dans le terminal.",
+                "Le comportement est appliqué aux outils principaux, à l'agent IA, à la configuration, au désinstalleur et aux utilitaires interactifs."
+            ]
+        },
+        {
+            "version": "0.1.8",
+            "date": "2026-09-24",
+            "title": "Lecture de fichier",
+            "changes": [
+                "Ajout d'une commande dans le chat qui permet de donner a l'ia un fichier. (/fichier chemin/vers/le/fichier). Pour l'instant, lecture uniquement."
+            ]
+        }
+        ,
+        {
+            "version": "0.2.0.0(beta1+2)",
+            "date": "2026-09-25",
+            "title": "Lecture de fichier + lancement de programme (beta1+2)",
+            "changes": [
+                "Ajout de la possibilité de l'ia de lancer des programme via une demande simple, pas de commande necessaire."
+            ]
+        },
+        {
+            "version": "0.2.0.1(beta3)",
+            "date": "2026-09-26",
+            "title": "Refonte IA + validation de phases (beta3)",
+            "changes": [
+                "Phase 1 : centralisation du flux IA avec RequestRouter, ContextCompiler et ToolManager.",
+                "Phase 2 : ajout du routeur et du fast path pour les actions simples et déterministes.",
+                "Phase 3 : sélection dynamique des outils selon la route et réductions des outils envoyés au modèle.",
+                "Phase 4 : compilation du contexte en blocs structurés pour les prompts.",
+                "Phase 5 : historique compact avec résumé et fenêtre récente pour réduire le poids du contexte.",
+                "Phase 6 : mémoire SQLite avec tri de pertinence et maintien de l'API historique.",
+                "Phases 7 à 10 : recherche mémoire sémantique, compression des résultats outils, boucle de contrôle des outils, et écriture asynchrone.",
+                "Phase 11 : cache des prompts et des blocs de contexte pour éviter les recalculs inutiles.",
+                "Phase 12 : session Ollama centralisée avec gestion unique des appels LLM.",
+                "Phase 13 : support du streaming optionnel sans surcharge sur les appels internes.",
+                "Phase 14 : extraction mémoire filtrée et déduplication avant sauvegarde.",
+                "Phase 15 : centralisation des conversations et réduction de la duplication du code.",
+                "Phase 16 : validation de non-régression sur les flux critiques et correction du cache de prompt.",
+                "Phase 17 : benchmark final avec scénarios critiques et métriques détaillées.",
+                "Phase 18 : seuils de performance et validation automatique.",
+                "Phase 19 : ordre de déploiement recommandé pour la structure finale.",
+                "Phase 20 : architecture cible documentée et exposée sans réécriture complète du projet.",
+                "Le projet est aujourd'hui cohérent, testé et stable : 116 tests passent."
+            ]
+        },
+        {
+            "version": "0.2.0.2(beta4)",
+            "date": "2026-09-27",
+            "title": "Utilisation de la nouvelle API OpenRouter (beta4)",
+            "changes": [
+                "Ajout de la possibilité d'utiliser l'API OpenRouter pour les modèles LLM.",
+                "Ajout d'une option de configuration pour choisir entre Ollama et OpenRouter.",
+                "Mise à jour de la documentation pour inclure les instructions d'utilisation d'OpenRouter."
+            ]
+        },
+        {
+            "version": "0.2.0.3(beta5)",
+            "date": "2026-09-28",
+            "title": "Recherche web, applications et conversations (beta5)",
+            "changes": [
+                "Ajout d'un outil de recherche web pour les informations récentes, dont la météo actuelle par ville via Open-Meteo.",
+                "Ajout d'une réponse déterministe à la question sur la date du jour.",
+                "Réparation du lancement d'applications, avec détection automatique et autorisation distincte de l'exécution de commandes.",
+                "Mémorisation persistante des chemins et alias d'applications fournis dans la conversation, avec tolérance aux fautes de frappe courantes.",
+                "Compréhension des corrections contextuelles comme « WhatsApp s'appelle ZapZap » après un lancement infructueux.",
+                "Protection contre l'interprétation d'appels d'outils recopiés comme des chemins d'application.",
+                "Génération et mise à jour automatiques du titre de conversation selon son sujet, affiché dans l'interface web et le CLI.",
+                "Conservation des sujets de conversation définis manuellement."
+            ]
+        },
+        {
+            "version": "0.2.0.6(beta6)",
+            "date": "2026-09-28",
+            "title": "Recherche web multi-catégories et raccourci de lancement (beta6)",
+            "changes": [
+                "Ajout de catégories de recherche : Web général, actualités, sites officiels, annonces et météo.",
+                "Recherche Google tentée en premier, avec repli automatique sur DuckDuckGo si les résultats Google ne sont pas accessibles.",
+                "Routage des demandes de recherche vers la catégorie adaptée et transmission du type de recherche à l'outil web.",
+                "Ajout d'une icône de zone de notification sous Linux/KDE et Windows, ouvrant main.py en un clic et démarrée à l'ouverture de session."
+            ]
+        },
+        {
+            "version": "0.2.0.7(beta7)",
+            "date": "2026-10-01",
+            "title": "Comptes locaux et utilisation sans Ollama (beta7)",
+            "changes": [
+                "Ajout d'un écran de démarrage pour se connecter, créer un compte ou continuer sans compte.",
+                "La création d'un compte ouvre les options API OpenRouter : clé, modèle, URL et timeout.",
+                "Les clés API sont chiffrées pour chaque compte local et déverrouillées uniquement après connexion.",
+                "Ollama devient facultatif : le menu et OpenRouter restent disponibles sans installation locale."
+            ]
+        },
+        {
+            "version": "0.2.0.8(beta8)",
+            "date": "2026-10-01",
+            "title": "Commande iahelp avec historique persistant (beta8)",
+            "changes": [
+                "Ajout de la commande iahelp utilisable depuis n'importe quel dossier après installation.",
+                "Les demandes précédentes envoyées avec iahelp sont conservées localement et jointes comme contexte aux nouvelles requêtes.",
+                "Installation automatique du lanceur dans le PATH utilisateur sous Linux, macOS et Windows."
+            ]
+        },
+        {
+            "version": "0.2.0.9(beta9)",
+            "date": "2026-10-01",
+            "title": "Aide PC et contrôle renforcé (beta9)",
+            "changes": [
+                "iahelp fournit des commandes directement copiables et adapte ses conseils aux caractéristiques du PC et aux exécutables détectés.",
+                "La connexion OpenRouter d'iahelp est mémorisée dans le coffre-fort sécurisé du système pour éviter de ressaisir le mot de passe.",
+                "La commande /code présente d'abord un diagnostic et un diff; les fichiers ne sont modifiés qu'après approbation explicite.",
+                "Ajout des commandes /forget <id> et /forget-all pour gérer les souvenirs, avec confirmation avant la suppression complète.",
+                "Fiabilisation des vérifications : benchmark isolé sur des fichiers temporaires, test OpenRouter manuel séparé avec clé masquée, et fermeture correcte des réponses HTTP d'erreur lors du fallback mémoire."
+            ]
+        },
+        {
+            "version": "0.2.0.10(beta10)",
+            "date": "2026-10-01",
+            "title": "Connexion mémorisée, sécurité et architecture (beta10)",
+            "changes": [
+                "Les sessions de compte sont conservées dans le trousseau sécurisé du système et restaurées au démarrage du GUI et du CLI.",
+                "Le clic sur l’icône rapide ouvre désormais le GUI; l’action dédiée au terminal reste disponible.",
+                "Correction du doublon du bouton Paramètres dans le GUI.",
+                "L’auto-updater inclut désormais LICENSE et THIRD_PARTY_NOTICES.md et vérifie leur présence avant l’installation.",
+                "Le serveur web écoute sur localhost par défaut; l’accès réseau exige un jeton et les commandes restent réservées aux clients locaux.",
+                "Les commandes inconnues nécessitent désormais une confirmation; seules les commandes de lecture explicitement autorisées s’exécutent directement.",
+                "Le dispatch POST du serveur est organisé par routes et les flux de création, fermeture et chat sont couverts par des tests HTTP.",
+                "Le catalogue, le scan et les menus de modèles, l’aide du CLI et les fonctions de mise à jour sont séparés dans le package local_ia.",
+                "Les embeddings des souvenirs sont stockés dans SQLite et les bases existantes sont migrées automatiquement; les sauvegardes de conversations utilisent des instantanés profonds et du JSON compact.",
+                "Les appels HTTP partagent un client qui valide les URL HTTP(S) et limite les retries aux requêtes GET et HEAD.",
+                "Ajout de pytest, Ruff et d'un workflow GitHub Actions; la suite compte 280 tests."
+            ]
+        },
+        {
+            "version": "0.2.0.11(beta11)",
+            "date": "2026-10-02",
+            "title": "Gestion des clés API et performances (beta11)",
+            "changes": [
+                "Ajout d'un menu dédié aux clés OpenRouter : aperçu masqué, consultation de l'usage par clé, ajout, suppression et activation ou désactivation.",
+                "L'état actif des clés est conservé dans le compte chiffré; seules les clés activées sont utilisées et le compte conserve toujours au moins une clé active.",
+                "L'exécution de commandes suit désormais une politique restrictive : les commandes inconnues ou capables d'exécuter du code nécessitent une confirmation.",
+                "Les embeddings des souvenirs sont stockés dans SQLite, avec migration des bases existantes et calcul limité aux requêtes ou aux souvenirs encore non indexés.",
+                "Les sauvegardes de conversations utilisent deepcopy et un JSON compact pour réduire le coût de sérialisation et la taille des fichiers.",
+                "Centralisation des requêtes HTTP avec validation des URL HTTP(S) et retries réservés aux requêtes GET et HEAD.",
+                "La suite atteint 286 tests; Ruff et pytest passent dans le workflow CI."
+            ]
+        },
+        {
+            "version": "0.2.0.12(beta12)",
+            "date": "2026-10-02",
+            "title": "Réponses plus utiles et installation d'applications (beta12)",
+            "changes": [
+                "Retrait complet de l'interface web; l'outil de recherche Web de l'assistant reste disponible.",
+                "Ajout de l'installation d'applications depuis program_catalog.json dans le terminal, la GUI et le chat, avec confirmation avant exécution.",
+                "Amélioration du routage des demandes d'information, de code, de commandes à copier, d'installation et de lancement d'applications.",
+                "Ajout d'une évaluation reproductible hors ligne de cinq parcours de réponse, sans appel à un modèle ni accès réseau.",
+                "Affichage de la progression des actions dans le terminal et la GUI, avec arrêt explicite en cas de répétition ou de limite d'étapes.",
+                "La suite complète compte désormais 302 tests."
+            ]
+        },
+        {
+            "version": "0.2.0.13(beta13)",
+            "date": "2026-10-04",
+            "title": "Espace de code et outils documentaires (beta13)",
+            "changes": [
+                "Ajout d'un mode Code organisé par projets, avec création, reprise, classement, import, export et gestion des tâches.",
+                "Ajout d'outils de développement par projet : Git avec confirmations, sauvegarde et restauration de fichiers, analyse et formatage Python avec Ruff.",
+                "Ajout d'un outil documentaire pour lire, créer et convertir des fichiers PDF et Office, analyser et transformer des tableaux, créer des graphiques SVG et traiter des archives ZIP.",
+                "Ajout de requêtes SQLite en lecture seule, de l'OCR PDF optionnel et de protections contre les chemins dangereux, l'écrasement et les archives malveillantes.",
+                "Ajout de la création de fichiers téléchargeables depuis l'interface graphique, sans écraser les fichiers existants.",
+                "Amélioration du routage des demandes documentaires et de code, de la rotation des clés OpenRouter et du repli vers le modèle par défaut lorsqu'un modèle choisi est indisponible.",
+                "Ajout d'un raccourci KAIRO dans le menu Démarrer de Windows, sans remplacer un raccourci déjà personnalisé."
+            ]
+        },
+        {
+            "version": "0.2.0.14(beta14)",
+            "date": "2026-10-04",
+            "title": "Espace de travail graphique et gestion des comptes (beta14)",
+            "changes": [
+                "Refonte de l'interface graphique autour d'un espace de travail réunissant conversations, projets de code et terminal.",
+                "Ajout de la gestion des conversations : recherche, filtres, classement, renommage, édition des messages, copie, import, export et suppression.",
+                "Ajout de la gestion des projets et de l'explorateur de fichiers : création, classement, import, export, renommage et suppression.",
+                "Ajout de l'édition de fichiers dans la GUI avec sauvegardes, aperçu HTML en direct et validation des modifications proposées par l'IA avant écriture.",
+                "Ajout d'un gestionnaire de clés OpenRouter permettant de créer, ajouter, consulter l'usage, activer, désactiver et supprimer des clés.",
+                "Intégration des formulaires de connexion et de création de compte, avec restauration des sessions enregistrées.",
+                "Ajout de réglages persistants pour le thème et le son des notifications, ainsi que de la sélection de modèles prédéfinis.",
+                "Renforcement des contrôles des outils et de l'exécution Python, avec permissions par projet et exécution réservée aux fichiers Python du projet."
+            ]
+        },
+        {
+            "version": "0.2.0.15(beta15)",
+            "date": "2026-10-07",
+            "title": "Interface modernisée, puissance IA et clés multiples (beta15)",
+            "changes": [
+                "Réduction du volume des requêtes IA grâce à un contexte plus compact, avec limitation des messages, de l'historique, des souvenirs et des cours transmis au modèle.",
+                "Ajout d'un réglage de puissance IA dans les paramètres, ajustable par jauge et adapté au nombre de clés OpenRouter actives.",
+                "Ajout du choix du nombre de clés OpenRouter à créer, de 1 à 10, à l'inscription et dans le gestionnaire de clés; chaque clé nécessite sa propre autorisation.",
+                "Modernisation de l'interface graphique et des paramètres, avec des thèmes sombre et clair harmonisés et des contrôles retravaillés.",
+                "Correction de la déconnexion depuis les paramètres : la fenêtre se ferme pour laisser la page de connexion visible."
+            ]
+        },
+        {
+            "version": "0.2.0.16(beta16)",
+            "date": "2026-10-07",
+            "title": "Recherche intelligente d'applications (beta16)",
+            "changes": [
+                "Ajout d'un index des applications installées, actualisé en arrière-plan sous Linux, Windows et macOS, avec recherche récursive des raccourcis et dossiers d'installation courants.",
+                "L'IA interprète les demandes d'applications par usage, recherche une candidate dans l'inventaire du PC et demande confirmation avant de la lancer.",
+                "Prise en charge du choix d'une autre application par son nom et reprise des conversations où l'IA demande laquelle lancer.",
+                "Amélioration du routage pour tolérer une faute de frappe isolée dans certains mots-clés de demande."
+            ]
+        },
+        {
+            "version": "0.2.0.17(beta17)",
+            "date": "2026-10-09",
+            "title": "Outils intégrés, navigateur et service en arrière-plan (beta17)",
+            "changes": [
+                "Centralisation des descriptions d'outils dans tools.json et intégration des outils de traduction et de gestion des habitudes à KAIRO.",
+                "Ajout d'un menu supérieur avec des pages dédiées au traducteur, aux habitudes, à la calculatrice et au navigateur Web.",
+                "La calculatrice dispose d'un pavé inspiré de celle de Windows, des opérations usuelles, de la mémoire et de raccourcis clavier.",
+                "Ajout d'un navigateur intégré avec affichage des pages, barre d'adresse, navigation précédent/suivant et moteurs DuckDuckGo, Google et Brave.",
+                "Réorganisation de la page Habitudes et ajout d'une consultation triable, filtrable et colorée de l'historique update.json dans les Paramètres.",
+                "Ajout de sleep.py, service de fond indépendant de la fenêtre pour les notifications de rappels et d'habitudes, avec démarrage automatique configurable sous Linux et Windows.",
+                "Ajout dans les Paramètres des actions pour fermer ou redémarrer KAIRO; iahelp reste disponible séparément dans le terminal.",
+                "Les Paramètres occupent désormais la fenêtre principale et l'updater distribue le nouveau service Sleep."
+            ]
+        },
+        {
+            "version": "0.2.0.18(beta18)",
+            "date": "2026-10-12",
+            "title": "Fiabilité des outils et réponses enrichies (beta18)",
+            "changes": [
+                "Ajout d'un banc graphique test.py couvrant les 18 outils, avec arguments configurables, résultats, vérification et journal des erreurs.",
+                "Ajout au démarrage du GUI d'un diagnostic isolé des outils; les échecs et prérequis manquants déclenchent une notification sans modifier les données utilisateur.",
+                "Ajout d'un mode de conversation OpenRouter réel dans le banc de test, avec historique, progression et affichage des erreurs API.",
+                "Amélioration de l'outil météo avec les prévisions journalières, dont le détail de la météo de demain.",
+                "Le transcript graphique interprète désormais le Markdown des réponses : gras, italique, listes, titres et blocs de code.",
+                "Amélioration du nettoyage des réponses pour retirer les préambules méta sur les limites de longueur.",
+                "Fiabilisation de la création de fichiers texte à partir du contenu de la conversation et des appels OpenRouter."
+            ]
+        },
+        {
+            "version": "0.2.0.20(beta20)",
+            "date": "2026-10-12",
+            "title": "Habitudes, notifications et interface graphique (beta20)",
+            "changes": [
+                "Ajout du bouton « Tester l'habitude » : il affiche l'aperçu réel de la prochaine notification sans marquer l'habitude comme envoyée.",
+                "Amélioration du routage des demandes météo récurrentes, avec tolérance à certaines fautes de frappe; KAIRO crée l'habitude du matin et donne immédiatement la météo actuelle de la ville configurée.",
+                "La réponse météo immédiate évite une notification en doublon le même jour; l'habitude est planifiée chaque matin à 08:00.",
+                "Correction des notifications GUI : elles s'affichent depuis n'importe quel onglet et les types d'événement inconnus ne sont plus supprimés sans affichage.",
+                "Le lancement sans argument ouvre directement l'interface graphique; l'ancienne console interactive est retirée et iahelp reste disponible dans le terminal.",
+                "Ajout d'un indicateur de chargement au banc de test des outils et transmission correcte de la session OpenRouter au diagnostic de démarrage."
+            ],
+            "code_statistics": {
+                "extensions": {
+                    ".json": {"fichiers": 43, "lignes": 34355},
+                    ".py": {"fichiers": 346, "lignes": 32380},
+                    ".md": {"fichiers": 6, "lignes": 877},
+                    ".txt": {"fichiers": 458, "lignes": 618},
+                    ".css": {"fichiers": 125, "lignes": 350},
+                    ".js": {"fichiers": 2, "lignes": 334},
+                    ".html": {"fichiers": 125, "lignes": 266},
+                    "[sans extension]": {"fichiers": 1, "lignes": 21},
+                    ".log": {"fichiers": 1, "lignes": 13},
+                    ".toml": {"fichiers": 1, "lignes": 10}
+                },
+                "total": {"fichiers": 1108, "lignes": 69224},
+                "fichiers_ignores": 1
+            }
+        },
+        {
+            "version": "0.2.0.21(beta21)",
+            "date": "2026-10-17",
+            "title": "Exécutable portable et gestion des applications (beta21)",
+            "changes": [
+                "Ajout d'un build de l'application KAIRO portable avec son runtime Python intégré; le démarrage ne nécessite pas d'installation Python.",
+                "Ajout dans les Paramètres d'une section Applications affichant les applications détectées et les entrées enregistrées pour le lancement par nom.",
+                "Possibilité d'ajouter une application depuis son fichier ou son dossier et de la retirer du registre de lancement automatique.",
+                "L'aide de l'application compilée présente désormais le lancement par exécutable au lieu des commandes Python."
+            ]
+        }
+    ]
+}

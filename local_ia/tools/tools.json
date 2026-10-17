@@ -1,0 +1,28 @@
+{
+  "tools": {
+    "memory": "memory : {} — retrouver les messages précédents et les souvenirs enregistrés.",
+    "context": "context : {} — consulter le contexte permanent de l’assistant.",
+    "list": "list : {\"path\":\"...\"} — voir les fichiers et dossiers d’un dossier.",
+    "search": "search : {\"pattern\":\"...\", \"path\":\"...\", \"extension\":\"py\"} — trouver du texte dans des fichiers.",
+    "file": "file : {\"path\":\"...\"} — lire le contenu d’un fichier autorisé.",
+    "write": "write : {\"path\":\"...\", \"content\":\"...\", \"append\":false} — créer ou modifier un fichier, ou ajouter du contenu avec append:true.",
+    "create_download": "create_download : {\"filename\":\"...\", \"content\":\"...\", \"extension\":\"txt\"} — préparer un fichier à télécharger.",
+    "document": "document : {\"action\":\"...\", ...} — lire, créer ou convertir des documents, analyser des tableaux et traiter des archives.",
+    "edit": "edit : {\"path\":\"...\", \"old\":\"texte exact\", \"new\":\"remplacement\"} — remplacer un passage précis dans un fichier.",
+    "launch": "launch : {\"name\":\"...\"} — ouvrir une application installée.",
+    "reminder": "reminder : {\"action\":\"create|list|complete|cancel|snooze\", ...} — créer et gérer des rappels locaux.",
+    "command": "command : {\"argv\":[\"programme\",\"argument\"], \"cwd\":\"/dossier\"} — lancer une commande sans interpréteur shell.",
+    "system": "system : {\"action\":\"info|up|down|mute|unmute|install_app|install|update\", \"value\":\"...\"} — consulter ou modifier certains réglages du système.",
+    "web": "web : {\"query\":\"...\", \"category\":\"web|news|sites|ads|weather\", \"max_results\":5} — rechercher des informations sur le Web.",
+    "open_page": "open_page : {\"url\":\"https://example.com\"} — ouvrir une adresse Web dans le navigateur.",
+    "calculator": "calculator : {\"expression\":\"...\"} — effectuer un calcul arithmétique.",
+    "translate": "translate : {\"text\":\"...\", \"target_language\":\"...\", \"source_language\":\"auto\"} — traduire un texte avec le modèle OpenRouter configuré.",
+    "habits": "habits : {\"action\":\"list|add|update|delete|activate|deactivate|complete|set_city|weather_now|weather_daily|preview\", ...} — gérer les habitudes enregistrées, leur fréquence et leur ville météo. weather_daily crée une habitude météo quotidienne le matin et renvoie la météo actuelle; preview génère le texte d'une habitude sans la marquer comme notifiée."
+  },
+  "support_modules": {
+    "applications": "Recherche une application installée et fournit des fonctions pour la lancer.",
+    "commands": "Façade de compatibilité pour les commandes système.",
+    "files": "Façade de compatibilité pour les opérations de lecture et d’écriture de fichiers.",
+    "programs": "Accès au catalogue de programmes et à leurs opérations de gestion."
+  }
+}

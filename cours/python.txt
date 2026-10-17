@@ -1,0 +1,23 @@
+PYTHON — FICHE DE RÉFÉRENCE
+
+Base : les blocs sont délimités par l'indentation; utiliser 4 espaces. Noms en snake_case, constantes en MAJUSCULES.
+
+Types courants : int, float, str, bool, None, list, tuple, dict, set. Convertir explicitement avec int(), float(), str(). Une chaîne saisie par input() doit être validée et convertie.
+
+Contrôle : if/elif/else; for element in iterable; while condition; break/continue. Tester les bornes et le cas vide.
+
+Fonctions : def nom(parametre: Type) -> Type:. Une fonction fait une tâche claire, valide ses arguments et retourne une valeur avec return. Éviter les variables globales et les effets implicites.
+
+Collections : liste pour une séquence modifiable, tuple pour des éléments fixes, dict pour clé-valeur, set pour unicité. Parcourir directement les éléments; ne pas modifier une liste pendant son parcours.
+
+Fichiers : utiliser pathlib.Path et with open(..., encoding="utf-8") pour fermer proprement. Ne jamais écraser sans vérifier si le besoin ne l'autorise pas.
+
+Erreurs : capturer uniquement les exceptions attendues (ValueError, OSError, FileNotFoundError); afficher un message utile. Ne pas masquer toutes les erreurs avec except Exception.
+
+Programme autonome : regrouper le comportement dans main(), puis utiliser if __name__ == "__main__": main(). Séparer saisie, logique et affichage pour rendre le code testable.
+
+Exemple d'entrée robuste :
+try:
+    age = int(input("Âge : "))
+except ValueError:
+    print("Saisis un nombre entier.")

@@ -1,0 +1,13 @@
+RÉSEAUX — FICHE DE RÉFÉRENCE
+
+Modèle pratique : application → transport (TCP/UDP) → IP → liaison (Ethernet/Wi-Fi). IP identifie une interface; un port identifie un service sur cette machine.
+
+IPv4 : une adresse et un préfixe CIDR (ex. 192.168.1.10/24) décrivent l'hôte et son sous-réseau. La passerelle route vers d'autres réseaux. DHCP attribue la configuration; DNS traduit les noms en adresses.
+
+TCP établit une connexion fiable, ordonnée et avec contrôle de flux; usages typiques : HTTP(S), SSH. UDP envoie des datagrammes sans garantie de livraison; utile quand la latence compte, comme DNS ou la voix.
+
+HTTP : requête = méthode, URL, en-têtes, corps; réponse = code, en-têtes, corps. GET lit, POST crée/traite, PUT remplace, PATCH modifie, DELETE supprime. HTTPS ajoute le chiffrement TLS et l'authentification du serveur.
+
+Codes utiles : 2xx succès, 3xx redirection, 400 requête invalide, 401 authentification requise, 403 interdit, 404 introuvable, 429 limitation, 5xx erreur serveur.
+
+Diagnostic : vérifier dans l'ordre interface/Wi-Fi, adresse IP, passerelle, DNS, port et service. Distinguer délai dépassé, refus de connexion, erreur DNS et erreur HTTP. Ne jamais exposer clés, mots de passe ou données privées dans les journaux.
