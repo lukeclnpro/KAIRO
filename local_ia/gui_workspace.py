@@ -6,6 +6,7 @@ import json
 import ast
 import difflib
 import hashlib
+import html
 import os
 import re
 import shutil
@@ -2987,6 +2988,54 @@ class KairoWorkspace(QMainWindow):
     def _open_notification_settings(self):
         self._open_settings("Notifications")
 
+    def _bug_log_html(self):
+        try:
+            data = json.loads((BASE_DIR / "bug.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return "<p>Le journal des correctifs est indisponible.</p>"
+
+        versions = data.get("versions", {})
+        if not isinstance(versions, dict) or not versions:
+            return "<p>Aucun correctif n’est enregistré.</p>"
+
+        light_theme = self.ui_settings.value("appearance/theme", "dark") == "light"
+        if light_theme:
+            body_background = "#fbfcf9"
+            body_color = "#26372c"
+            heading_color = "#347145"
+            heading_border = "#d2ddd3"
+            component_color = "#2e4936"
+        else:
+            body_background = "#1a231e"
+            body_color = "#e7eee9"
+            heading_color = "#b9e9c6"
+            heading_border = "#344138"
+            component_color = "#d3e2d8"
+
+        sections = []
+        for version, fixes in reversed(list(versions.items())):
+            sections.append(f"<h2>Version {html.escape(str(version))}</h2>")
+            if not isinstance(fixes, list):
+                continue
+            for item in fixes:
+                if not isinstance(item, dict):
+                    continue
+                component = html.escape(str(item.get("component", "Correctif")))
+                bug = html.escape(str(item.get("bug", "")))
+                fix = html.escape(str(item.get("fix", "")))
+                sections.append(
+                    f"<h3>{component}</h3><p><b>Bug :</b> {bug}</p>"
+                    f"<p><b>Correction :</b> {fix}</p>"
+                )
+        return (
+            "<html><head><style>"
+            f"body {{ background: {body_background}; color: {body_color}; font-family: sans-serif; }}"
+            f"h2 {{ color: {heading_color}; border-bottom: 1px solid {heading_border}; padding-bottom: 5px; }}"
+            f"h3 {{ color: {component_color}; margin-bottom: 4px; }}"
+            "p { margin-top: 3px; }"
+            "</style></head><body>" + "".join(sections) + "</body></html>"
+        )
+
     def _open_settings(self, initial_tab=None):
         previous_page = getattr(self, "_settings_page", None)
         if previous_page is not None:
@@ -3386,6 +3435,29 @@ class KairoWorkspace(QMainWindow):
         notification_layout.addWidget(test_sound)
         notification_layout.addStretch(1)
         tabs.addTab(notifications, "Notifications")
+
+        bug_fixes_page = QWidget()
+        bug_fixes_layout = QVBoxLayout(bug_fixes_page)
+        bug_fixes_layout.setContentsMargins(20, 20, 20, 20)
+        bug_fixes_layout.setSpacing(12)
+        bug_fixes_header = QWidget()
+        bug_fixes_header_layout = QHBoxLayout(bug_fixes_header)
+        bug_fixes_header_layout.setContentsMargins(0, 0, 0, 0)
+        bug_logo = QLabel()
+        bug_logo.setFixedSize(48, 48)
+        bug_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        bug_logo.setPixmap(desktop_tray._create_icon().pixmap(48, 48))
+        bug_fixes_header_layout.addWidget(bug_logo)
+        bug_fixes_title = QLabel("Correctifs KAIRO")
+        bug_fixes_title.setObjectName("settingsTitle")
+        bug_fixes_header_layout.addWidget(bug_fixes_title)
+        bug_fixes_header_layout.addStretch(1)
+        bug_fixes_layout.addWidget(bug_fixes_header)
+        bug_fixes_browser = QTextBrowser()
+        bug_fixes_browser.setOpenExternalLinks(False)
+        bug_fixes_browser.setHtml(self._bug_log_html())
+        bug_fixes_layout.addWidget(bug_fixes_browser, 1)
+        tabs.addTab(bug_fixes_page, "Correctifs")
 
         background = QWidget()
         background_layout = QVBoxLayout(background)

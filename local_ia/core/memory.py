@@ -20,6 +20,7 @@ MAX_MEMORIES = 20
 _EMBEDDING_CACHE = {}
 _DEFAULT_EMBEDDING_MODEL = "nomic-embed-text"
 _MEMORY_QUEUE = Queue()
+_MEMORY_QUEUE_LOCK = threading.RLock()
 _MEMORY_THREAD = None
 _MEMORY_PATTERNS = [
     (re.compile(r"\b(?:je\s+pr[eé]f[eè]re|j'aime|je\s+n'aime\s+pas|je\s+veux\s+toujours|je\s+voudrais|je\s+souhaite)\b", re.I), "preference"),
@@ -174,9 +175,8 @@ def _ensure_memory_writer():
 
 
 def flush_memory_writes():
-    if _MEMORY_QUEUE.qsize() == 0:
-        return
-    _MEMORY_QUEUE.join()
+    with _MEMORY_QUEUE_LOCK:
+        _MEMORY_QUEUE.join()
 
 
 def save_memory(conn, content, async_mode=True):
@@ -189,30 +189,35 @@ def save_memory(conn, content, async_mode=True):
         )
         conn.commit()
 
-    if async_mode:
-        _ensure_memory_writer()
-        _MEMORY_QUEUE.put(write_memory)
-        return
-    write_memory()
+    with _MEMORY_QUEUE_LOCK:
+        if async_mode:
+            _ensure_memory_writer()
+            _MEMORY_QUEUE.put(write_memory)
+            return
+        _MEMORY_QUEUE.join()
+        write_memory()
 
 
 def list_memories(conn):
-    flush_memory_writes()
-    rows = conn.execute("SELECT id, content FROM memories ORDER BY id DESC").fetchall()
+    with _MEMORY_QUEUE_LOCK:
+        _MEMORY_QUEUE.join()
+        rows = conn.execute("SELECT id, content FROM memories ORDER BY id DESC").fetchall()
     return [{"id": row[0], "content": row[1]} for row in rows]
 
 
 def delete_memory(conn, memory_id):
-    flush_memory_writes()
-    cursor = conn.execute("DELETE FROM memories WHERE id = ?", (int(memory_id),))
-    conn.commit()
+    with _MEMORY_QUEUE_LOCK:
+        _MEMORY_QUEUE.join()
+        cursor = conn.execute("DELETE FROM memories WHERE id = ?", (int(memory_id),))
+        conn.commit()
     return cursor.rowcount == 1
 
 
 def clear_memories(conn):
-    flush_memory_writes()
-    cursor = conn.execute("DELETE FROM memories")
-    conn.commit()
+    with _MEMORY_QUEUE_LOCK:
+        _MEMORY_QUEUE.join()
+        cursor = conn.execute("DELETE FROM memories")
+        conn.commit()
     return cursor.rowcount
 
 
@@ -271,13 +276,14 @@ def save_memory_if_relevant(conn, content, async_mode=True):
 
 
 def get_memories(conn, limit=MAX_MEMORIES, query=None):
-    flush_memory_writes()
     limit = max(0, int(limit))
     if limit == 0:
         return []
-    rows = conn.execute(
-        "SELECT id, content, embedding, embedding_model FROM memories ORDER BY id DESC"
-    ).fetchall()
+    with _MEMORY_QUEUE_LOCK:
+        _MEMORY_QUEUE.join()
+        rows = conn.execute(
+            "SELECT id, content, embedding, embedding_model FROM memories ORDER BY id DESC"
+        ).fetchall()
     memories = [row[1] for row in rows]
     if query is None:
         return memories[:limit]
@@ -289,6 +295,7 @@ def get_memories(conn, limit=MAX_MEMORIES, query=None):
     selected_model = _embedding_model_name()
     query_embedding = compute_embedding(query, model=selected_model)
     ranked = []
+    embedding_updates = []
     for index, (memory_id, item, stored_embedding, stored_model) in enumerate(rows):
         lexical_score = len(query_terms & _terms(item))
         semantic_score = 0.0
@@ -302,15 +309,25 @@ def get_memories(conn, limit=MAX_MEMORIES, query=None):
                 item_embedding = None
         if item_embedding is None:
             item_embedding = compute_embedding(item, model=selected_model)
-            conn.execute(
-                "UPDATE memories SET embedding = ?, embedding_model = ? WHERE id = ?",
-                (json.dumps(item_embedding, separators=(",", ":")), selected_model, memory_id),
-            )
+            embedding_updates.append((
+                json.dumps(item_embedding, separators=(",", ":")),
+                selected_model,
+                memory_id,
+            ))
         if query_embedding and item_embedding:
             semantic_score = _cosine_similarity(query_embedding, item_embedding)
         total_score = lexical_score * 2.5 + semantic_score * 5.0
         if lexical_score or semantic_score > 0.15:
             ranked.append((total_score, lexical_score, index, item))
+
+    if embedding_updates:
+        with _MEMORY_QUEUE_LOCK:
+            _MEMORY_QUEUE.join()
+            conn.executemany(
+                "UPDATE memories SET embedding = ?, embedding_model = ? WHERE id = ?",
+                embedding_updates,
+            )
+            conn.commit()
 
     if ranked:
         ranked.sort(key=lambda entry: (-entry[0], -entry[1], entry[2]))
@@ -340,18 +357,30 @@ def get_memories(conn, limit=MAX_MEMORIES, query=None):
 
 
 def save_message(conn, conversation_id, role, content, async_mode=True):
-    if async_mode:
-        _ensure_memory_writer()
-        _MEMORY_QUEUE.put(lambda: conn.execute("INSERT INTO messages (conversation_id, role, content, created_at) VALUES (?, ?, ?, ?)", (conversation_id, role, content, datetime.now().isoformat())) and conn.commit())
-        return
-    conn.execute("INSERT INTO messages (conversation_id, role, content, created_at) VALUES (?, ?, ?, ?)", (conversation_id, role, content, datetime.now().isoformat()))
-    conn.commit()
+    def write_message():
+        conn.execute(
+            "INSERT INTO messages (conversation_id, role, content, created_at) VALUES (?, ?, ?, ?)",
+            (conversation_id, role, content, datetime.now().isoformat()),
+        )
+        conn.commit()
+
+    with _MEMORY_QUEUE_LOCK:
+        if async_mode:
+            _ensure_memory_writer()
+            _MEMORY_QUEUE.put(write_message)
+            return
+        _MEMORY_QUEUE.join()
+        write_message()
 
 
 def get_history(conn, conversation_id, limit=MAX_MEMORIES):
-    flush_memory_writes()
     limit = max(0, int(limit))
     if limit == 0:
         return []
-    rows = conn.execute("SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?", (conversation_id, limit)).fetchall()
+    with _MEMORY_QUEUE_LOCK:
+        _MEMORY_QUEUE.join()
+        rows = conn.execute(
+            "SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?",
+            (conversation_id, limit),
+        ).fetchall()
     return [{"role": role, "content": content} for role, content in reversed(rows)]

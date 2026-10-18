@@ -307,23 +307,7 @@
                 "Correction des notifications GUI : elles s'affichent depuis n'importe quel onglet et les types d'événement inconnus ne sont plus supprimés sans affichage.",
                 "Le lancement sans argument ouvre directement l'interface graphique; l'ancienne console interactive est retirée et iahelp reste disponible dans le terminal.",
                 "Ajout d'un indicateur de chargement au banc de test des outils et transmission correcte de la session OpenRouter au diagnostic de démarrage."
-            ],
-            "code_statistics": {
-                "extensions": {
-                    ".json": {"fichiers": 43, "lignes": 34355},
-                    ".py": {"fichiers": 346, "lignes": 32380},
-                    ".md": {"fichiers": 6, "lignes": 877},
-                    ".txt": {"fichiers": 458, "lignes": 618},
-                    ".css": {"fichiers": 125, "lignes": 350},
-                    ".js": {"fichiers": 2, "lignes": 334},
-                    ".html": {"fichiers": 125, "lignes": 266},
-                    "[sans extension]": {"fichiers": 1, "lignes": 21},
-                    ".log": {"fichiers": 1, "lignes": 13},
-                    ".toml": {"fichiers": 1, "lignes": 10}
-                },
-                "total": {"fichiers": 1108, "lignes": 69224},
-                "fichiers_ignores": 1
-            }
+            ]
         },
         {
             "version": "0.2.0.21(beta21)",
@@ -346,6 +330,18 @@
                 "clean_public peut convertir le dossier de développement sur place en version publique après aperçu et confirmation, en conservant uniquement la liste blanche définie.",
                 "Réécriture du README avec l’installateur Windows comme parcours principal et l’installation Python depuis GitHub en alternative.",
                 "Ajout d’un rapport des bugs et risques à corriger, avec les problèmes confirmés séparés des anomalies non reproduites."
+            ]
+        },
+        {
+            "version": "0.2.0.23(beta23-prebuild2)",
+            "date": "2026-10-18",
+            "title": "Prébuild 2 — fiabilité de Sleep et journal des correctifs (beta23)",
+            "changes": [
+                "Correction du démarrage de Sleep depuis l’exécutable empaqueté et son autostart.",
+                "Les rappels échus et les notifications d’habitudes sont conservés dans la file SQLite pour rester récupérables par l’interface.",
+                "Les habitudes échouées peuvent être retentées le même jour; les rappels mensuels conservent leur jour d’origine après les mois courts.",
+                "Ajout du journal bug.json, consultable directement dans KAIRO avec le logo et un affichage adapté aux thèmes sombre et clair.",
+                "Le journal des correctifs est inclus dans les builds et transféré lors des mises à jour."
             ]
         }
     ]

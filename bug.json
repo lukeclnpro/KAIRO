@@ -1,0 +1,26 @@
+{
+  "versions": {
+    "0.2.0.22": [
+      {
+        "component": "Sleep",
+        "bug": "Le service de fond ne démarrait pas depuis l'exécutable empaqueté.",
+        "fix": "Le service utilise maintenant l'entrée --tray du binaire KAIRO figé, y compris au démarrage automatique."
+      },
+      {
+        "component": "Rappels",
+        "bug": "Un rappel arrivé à échéance pouvait être marqué comme envoyé sans notification récupérable par l'interface.",
+        "fix": "L'événement du rappel est enregistré dans la file SQLite dans la même transaction que son changement de statut."
+      },
+      {
+        "component": "Habitudes",
+        "bug": "Une habitude était marquée comme notifiée avant la publication de sa notification.",
+        "fix": "Le marqueur quotidien est enregistré après la publication durable ; en cas d’échec de publication, une nouvelle tentative est autorisée le même jour."
+      },
+      {
+        "component": "Rappels mensuels",
+        "bug": "Les échéances fixées aux derniers jours du mois dérivaient après un mois plus court.",
+        "fix": "Le jour mensuel d'origine est conservé et utilisé pour calculer les occurrences suivantes."
+      }
+    ]
+  }
+}

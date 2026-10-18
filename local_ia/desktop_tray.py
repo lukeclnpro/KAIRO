@@ -75,13 +75,17 @@ def _desktop_quote(value: str | Path) -> str:
     return f'"{escaped}"'
 
 
+def _sleep_service_command() -> list[str]:
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--tray"]
+    return [_tray_python_executable(), str(SLEEP_SCRIPT)]
+
+
 def install_autostart() -> None:
     if IS_WINDOWS:
         import winreg
 
-        command = subprocess.list2cmdline(
-            (_tray_python_executable(), str(SLEEP_SCRIPT))
-        )
+        command = subprocess.list2cmdline(_sleep_service_command())
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, WINDOWS_RUN_KEY) as key:
             winreg.SetValueEx(key, WINDOWS_RUN_VALUE, 0, winreg.REG_SZ, command)
             try:
@@ -92,10 +96,7 @@ def install_autostart() -> None:
 
     AUTOSTART_FILE.parent.mkdir(parents=True, exist_ok=True)
     command = " ".join(
-        (
-            _desktop_quote(sys.executable),
-            _desktop_quote(SLEEP_SCRIPT),
-        )
+        _desktop_quote(argument) for argument in _sleep_service_command()
     )
     content = (
         "[Desktop Entry]\n"
@@ -181,7 +182,7 @@ def start_tray() -> None:
     if autostart_enabled():
         install_autostart()
     subprocess.Popen(
-        [_tray_python_executable(), str(SLEEP_SCRIPT)],
+        _sleep_service_command(),
         cwd=BASE_DIR,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
@@ -347,21 +348,45 @@ def run_tray() -> int:
             data = charger()
             due_habits = habits_due_to_notify(data, now, notified_habits)
             for habit in due_habits:
-                marquer_habitude_notifiee(data, habit, now)
                 task = HabitMessageTask(dict(habit), data.get("ville", "Paris"))
                 active_habit_tasks.add(task)
 
-                def deliver(result, worker=task):
+                def deliver(result, worker=task, habit_to_mark=habit, notification_day=now.date()):
                     title = str(result.get("task", "Habitude"))
                     message = str(result.get("message", ""))
-                    tray.showMessage(
-                        f"Habitude KAIRO · {title}",
-                        message,
-                        QSystemTrayIcon.MessageIcon.Information,
-                        10000,
-                    )
-                    publish_notification(reminder_connection, "habit", title, message)
-                    active_habit_tasks.discard(worker)
+                    published = False
+                    try:
+                        publish_notification(reminder_connection, "habit", title, message)
+                        published = True
+                        latest_data = charger()
+                        if not marquer_habitude_notifiee(
+                            latest_data, habit_to_mark, datetime.now()
+                        ):
+                            raise RuntimeError("Le rappel d’habitude n’a pas pu être enregistré.")
+                        if tray_available:
+                            tray.showMessage(
+                                f"Habitude KAIRO · {title}",
+                                message,
+                                QSystemTrayIcon.MessageIcon.Information,
+                                10000,
+                            )
+                    except Exception as error:
+                        if not published:
+                            notified_habits.discard(
+                                (
+                                    str(habit_to_mark.get("task", "")).casefold(),
+                                    notification_day.isoformat(),
+                                )
+                            )
+                        if tray_available:
+                            tray.showMessage(
+                                "Notification d’habitude indisponible",
+                                str(error),
+                                QSystemTrayIcon.MessageIcon.Warning,
+                                10000,
+                            )
+                    finally:
+                        active_habit_tasks.discard(worker)
 
                 task.completed.connect(deliver)
                 task.finished.connect(lambda worker=task: active_habit_tasks.discard(worker))

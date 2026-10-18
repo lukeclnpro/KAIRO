@@ -6,6 +6,8 @@ import calendar
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
+from local_ia.core.notifications import ensure_schema as ensure_notification_schema
+
 
 ACTIVE_STATUSES = ("scheduled", "notified")
 REPEAT_RULES = {None, "none", "daily", "weekly", "monthly"}
@@ -19,6 +21,7 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
             title TEXT NOT NULL,
             due_at TEXT NOT NULL,
             repeat_rule TEXT,
+            repeat_day INTEGER,
             status TEXT NOT NULL DEFAULT 'scheduled',
             created_at TEXT NOT NULL,
             last_notified_at TEXT
@@ -27,6 +30,17 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
     connection.execute(
         "CREATE INDEX IF NOT EXISTS reminders_due_idx ON reminders(status, due_at)"
     )
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(reminders)")}
+    if "repeat_day" not in columns:
+        connection.execute("ALTER TABLE reminders ADD COLUMN repeat_day INTEGER")
+    legacy_monthly = connection.execute(
+        "SELECT id, due_at FROM reminders WHERE repeat_rule = 'monthly' AND repeat_day IS NULL"
+    ).fetchall()
+    for reminder_id, due_at in legacy_monthly:
+        connection.execute(
+            "UPDATE reminders SET repeat_day = ? WHERE id = ?",
+            (datetime.fromisoformat(due_at).day, reminder_id),
+        )
     connection.commit()
 
 
@@ -55,8 +69,14 @@ def _local_datetime(value: str) -> str:
     return datetime.fromisoformat(value).astimezone().isoformat(timespec="seconds")
 
 
-def _next_occurrence(value: datetime, rule: str, now: datetime) -> datetime:
+def _next_occurrence(
+    value: datetime,
+    rule: str,
+    now: datetime,
+    monthly_day: int | None = None,
+) -> datetime:
     occurrence = value
+    anchor_day = monthly_day or occurrence.day
     while occurrence <= now:
         if rule == "daily":
             occurrence += timedelta(days=1)
@@ -66,7 +86,7 @@ def _next_occurrence(value: datetime, rule: str, now: datetime) -> datetime:
             month_index = occurrence.year * 12 + occurrence.month
             year, month_zero_based = divmod(month_index, 12)
             month = month_zero_based + 1
-            day = min(occurrence.day, calendar.monthrange(year, month)[1])
+            day = min(anchor_day, calendar.monthrange(year, month)[1])
             occurrence = occurrence.replace(year=year, month=month, day=day)
     return occurrence
 
@@ -118,9 +138,15 @@ def use(
         if due <= now:
             raise ValueError("L’échéance du rappel doit être dans le futur.")
         cursor = connection.execute(
-            "INSERT INTO reminders (title, due_at, repeat_rule, status, created_at) "
-            "VALUES (?, ?, ?, 'scheduled', ?)",
-            (clean_title, _stored_datetime(due), None if rule == "none" else rule, _stored_datetime(now)),
+            "INSERT INTO reminders (title, due_at, repeat_rule, repeat_day, status, created_at) "
+            "VALUES (?, ?, ?, ?, 'scheduled', ?)",
+            (
+                clean_title,
+                _stored_datetime(due),
+                None if rule == "none" else rule,
+                due.day if rule == "monthly" else None,
+                _stored_datetime(now),
+            ),
         )
         connection.commit()
         return {"action": action, "reminder": _serialize(_row(connection, cursor.lastrowid))}
@@ -170,16 +196,19 @@ def dispatch_due(
 ) -> list[dict]:
     """Notifie les rappels échus une fois, puis avance leur prochaine occurrence."""
     ensure_schema(connection)
+    ensure_notification_schema(connection)
     current_time = _utc_now(now)
     rows = connection.execute(
-        "SELECT id, title, due_at, repeat_rule FROM reminders "
+        "SELECT id, title, due_at, repeat_rule, repeat_day FROM reminders "
         "WHERE status = 'scheduled' AND due_at <= ? ORDER BY due_at, id",
         (_stored_datetime(current_time),),
     ).fetchall()
     notifications = []
-    for reminder_id, title, due_at, rule in rows:
+    for reminder_id, title, due_at, rule, repeat_day in rows:
         if rule:
-            next_due = _next_occurrence(datetime.fromisoformat(due_at), rule, current_time)
+            next_due = _next_occurrence(
+                datetime.fromisoformat(due_at), rule, current_time, repeat_day
+            )
             connection.execute(
                 "UPDATE reminders SET due_at = ?, last_notified_at = ? WHERE id = ?",
                 (_stored_datetime(next_due), _stored_datetime(current_time), reminder_id),
@@ -190,6 +219,21 @@ def dispatch_due(
                 (_stored_datetime(current_time), reminder_id),
             )
         notifications.append({"id": reminder_id, "title": title, "repeat": rule})
+
+    notification_created_at = _stored_datetime(current_time)
+    for reminder in notifications:
+        message = str(reminder["title"])
+        if reminder["repeat"]:
+            message += "\nRappel récurrent."
+        connection.execute(
+            "INSERT INTO app_notifications (kind, title, message, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            ("reminder", "Rappel KAIRO", message, notification_created_at),
+        )
+    connection.execute(
+        "DELETE FROM app_notifications WHERE created_at < ?",
+        (_stored_datetime(current_time - timedelta(days=1)),),
+    )
     connection.commit()
 
     for reminder in notifications:

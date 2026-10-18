@@ -1,6 +1,6 @@
 # KAIRO
 
-**Assistant personnel avec modèles locaux ou OpenRouter.** Version actuelle : **0.2.0.22 (bêta 22, prébuild 1)**.
+**Assistant personnel avec modèles locaux ou OpenRouter.** Version actuelle : **0.2.0.22 (bêta 22, prébuild 2)**.
 
 ## Installer KAIRO sur Windows
 
@@ -39,6 +39,14 @@ Une connexion Internet est requise pour OpenRouter, la recherche Web et les mise
 
 L’installateur `.exe` est destiné à Windows. Sous Linux ou macOS, utilisez les sources du dépôt avec Python. Le démarrage graphique fonctionne avec `python3 main.py` sous Linux/macOS et `python main.py` sous Windows.
 
+Pour tenter de construire l’installateur Windows localement depuis Linux x86_64, avec Wine et une connexion Internet :
+
+```bash
+bash dev/build_windows_local.sh
+```
+
+Le script crée un préfixe Wine dédié, y installe Python pour Windows et les dépendances, puis ouvre l’interface graphique du créateur. Le fichier `dev/<version>/KAIRO-Setup-<version>.exe` n’est produit qu’après avoir lancé le build depuis cette interface. PyInstaller sous Wine est moins fiable qu’un build exécuté sur Windows natif.
+
 ## Alternative : installer depuis les sources
 
 Cette méthode est destinée aux personnes qui n’utilisent pas l’installateur ou souhaitent lancer le code source. Elle requiert Git et Python 3.10 ou plus récent.
@@ -59,7 +67,7 @@ cd KAIRO
 python setup.py
 ```
 
-Pour démarrer directement depuis le dépôt, utilisez `python3 main.py` sous Linux/macOS ou `python main.py` sous Windows.
+Pour démarrer directement depuis le dépôt, utilisez `python3 main.py gui` sous Linux/macOS ou `python main.py gui` sous Windows.
 
 ## Licence et versions
 

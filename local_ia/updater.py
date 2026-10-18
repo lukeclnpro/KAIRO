@@ -15,6 +15,7 @@ from local_ia.http_client import open_url
 
 REMOTE_VERSION_URL = "https://raw.githubusercontent.com/lukeclnpro/KAIRO/main/version.json"
 REMOTE_ARCHIVE_URL = "https://github.com/lukeclnpro/KAIRO/archive/refs/heads/main.zip"
+MODEL_CATALOG_PATH = Path("local_ia/model_catalog.json")
 
 
 def _run_git(base_dir, arguments, timeout=15):
@@ -85,10 +86,12 @@ def get_current_version(version_file):
 def required_update_files(source_dir):
     required_files = [
         Path("version.json"),
+        Path("bug.json"),
         Path("update.json"),
         Path("LICENSE"),
         Path("THIRD_PARTY_NOTICES.md"),
         Path("local_ia/tools/tools.json"),
+        MODEL_CATALOG_PATH,
     ]
     for relative_path in required_files:
         if not (Path(source_dir) / relative_path).is_file():
@@ -156,6 +159,58 @@ def collect_update_files(source_dir, required_files):
     return list(dict.fromkeys(update_files))
 
 
+def _merge_model_catalog_for_update(release_path, installed_path):
+    """Update catalog metadata while keeping local discovery and custom entries."""
+    try:
+        release_catalog = json.loads(Path(release_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError("Le catalogue de modèles de la mise à jour est invalide.") from error
+    if not isinstance(release_catalog, dict) or not isinstance(release_catalog.get("providers"), dict):
+        raise RuntimeError("Le catalogue de modèles de la mise à jour est invalide.")
+
+    installed_catalog = load_json_file(installed_path)
+    installed_providers = (
+        installed_catalog.get("providers", {})
+        if isinstance(installed_catalog, dict)
+        else {}
+    )
+    if not isinstance(installed_providers, dict):
+        installed_providers = {}
+
+    release_providers = release_catalog["providers"]
+    merged_providers = {}
+    for provider in set(release_providers) | set(installed_providers):
+        release_entries = release_providers.get(provider, {})
+        installed_entries = installed_providers.get(provider, {})
+        if not isinstance(release_entries, dict):
+            release_entries = {}
+        if not isinstance(installed_entries, dict):
+            installed_entries = {}
+
+        merged_entries = {}
+        for model_id, release_entry in release_entries.items():
+            if not isinstance(release_entry, dict):
+                continue
+            merged_entry = dict(release_entry)
+            installed_entry = installed_entries.get(model_id)
+            if isinstance(installed_entry, dict):
+                for state_key in ("installed", "available"):
+                    if state_key in installed_entry:
+                        merged_entry[state_key] = installed_entry[state_key]
+            merged_entries[model_id] = merged_entry
+
+        for model_id, installed_entry in installed_entries.items():
+            if model_id not in merged_entries and isinstance(installed_entry, dict):
+                merged_entries[model_id] = installed_entry
+        merged_providers[provider] = merged_entries
+
+    release_catalog["providers"] = merged_providers
+    Path(release_path).write_text(
+        json.dumps(release_catalog, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
 def update_from_archive(base_dir, expected_version, archive_url=REMOTE_ARCHIVE_URL):
     base_dir = Path(base_dir)
     with tempfile.TemporaryDirectory() as temporary_directory:
@@ -201,6 +256,8 @@ def update_from_archive(base_dir, expected_version, archive_url=REMOTE_ARCHIVE_U
                 source = source_dir / relative_path
                 destination = base_dir / relative_path
                 destination.parent.mkdir(parents=True, exist_ok=True)
+                if relative_path == MODEL_CATALOG_PATH and destination.is_file():
+                    _merge_model_catalog_for_update(source, destination)
                 shutil.copy2(source, destination)
         except Exception:
             for relative_path in update_files:
@@ -284,6 +341,8 @@ def update_program(
                     label = "Licence"
                 elif relative_path == Path("program_catalog.json"):
                     label = "Catalogue d'applications"
+                elif relative_path == MODEL_CATALOG_PATH:
+                    label = "Catalogue de modèles"
                 else:
                     label = "Fichier"
                 print(f"  • {relative_path} ({label})")
@@ -305,6 +364,8 @@ def update_program(
                     source = source_dir / relative_path
                     destination = base_dir / relative_path
                     destination.parent.mkdir(parents=True, exist_ok=True)
+                    if relative_path == MODEL_CATALOG_PATH and destination.is_file():
+                        _merge_model_catalog_for_update(source, destination)
                     shutil.copy2(source, destination)
             except Exception:
                 ui_module.print_error("Erreur pendant la mise à jour.")
@@ -329,6 +390,7 @@ def update_program(
             print()
             ui_module.print_info("Fichiers Python mis à jour.")
             ui_module.print_info("Catalogue d'applications mis à jour.")
+            ui_module.print_info("Catalogue de modèles mis à jour en conservant l’état local.")
             ui_module.print_info("version.json mis à jour.")
             ui_module.print_info("update.json mis à jour.")
             print()
