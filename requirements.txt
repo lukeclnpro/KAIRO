@@ -1,0 +1,26 @@
+# Dépendances pour l'interface remodelée (couleurs + performances système)
+#
+# Installation :
+#     pip install -r requirements.txt
+#
+#
+# colorama améliore l'affichage des couleurs ANSI sous l'invite de
+# commandes Windows (cmd.exe). Sous Windows Terminal / PowerShell 7 /
+# Linux / macOS, il n'est pas obligatoire.
+#
+# Le GPU (nvidia-smi) ne nécessite aucune dépendance Python : il est
+# détecté automatiquement s'il est présent sur la machine (cartes
+# NVIDIA uniquement).
+
+colorama>=0.4
+cryptography>=42.0
+keyring>=25.6
+PySide6>=6.8; platform_system == "Linux" or platform_system == "Windows"
+markdown-it-py>=3.0
+pypdf>=5.0
+python-docx>=1.1
+openpyxl>=3.1
+reportlab>=4.2
+python-pptx>=1.0
+pdf2image>=1.17
+pytesseract>=0.3.13
