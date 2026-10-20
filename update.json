@@ -343,6 +343,14 @@
                 "Ajout du journal bug.json, consultable directement dans KAIRO avec le logo et un affichage adapté aux thèmes sombre et clair.",
                 "Le journal des correctifs est inclus dans les builds et transféré lors des mises à jour."
             ]
+        },
+        {
+            "version": "0.2.1",
+            "date": "2026-10-20",
+            "title": "Version stable 0.2.1",
+            "changes": [
+                "Publication de la version stable 0.2.1 après la phase bêta."
+            ]
         }
     ]
 }

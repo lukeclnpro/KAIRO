@@ -17,7 +17,7 @@
     "open_page": "open_page : {\"url\":\"https://example.com\"} — ouvrir une adresse Web dans le navigateur.",
     "calculator": "calculator : {\"expression\":\"...\"} — effectuer un calcul arithmétique.",
     "translate": "translate : {\"text\":\"...\", \"target_language\":\"...\", \"source_language\":\"auto\"} — traduire un texte avec le modèle OpenRouter configuré.",
-    "habits": "habits : {\"action\":\"list|add|update|delete|activate|deactivate|complete|set_city|weather_now|weather_daily|preview\", ...} — gérer les habitudes enregistrées, leur fréquence et leur ville météo. weather_daily crée une habitude météo quotidienne le matin et renvoie la météo actuelle; preview génère le texte d'une habitude sans la marquer comme notifiée."
+    "habits": "habits : {\"action\":\"list|add|update|delete|activate|deactivate|complete|set_city|weather_now|preview\", ...} — gérer les habitudes. Pour une création, extraire la tâche, la fréquence, les jours ou le jour du mois, le moment, l'heure et le type (IA/météo) de la phrase; demander les précisions manquantes au lieu de deviner. preview génère le texte sans marquer l'habitude comme notifiée."
   },
   "support_modules": {
     "applications": "Recherche une application installée et fournit des fonctions pour la lancer.",

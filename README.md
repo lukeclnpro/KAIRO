@@ -1,6 +1,6 @@
 # KAIRO
 
-**Assistant personnel avec modèles locaux ou OpenRouter.** Version actuelle : **0.2.0.22 (bêta 22, prébuild 2)**.
+**Assistant personnel avec modèles locaux ou OpenRouter.** Version actuelle : **0.2.0.23 (bêta 23, prébuild 2)**.
 
 ## Installer KAIRO sur Windows
 
@@ -68,6 +68,8 @@ python setup.py
 ```
 
 Pour démarrer directement depuis le dépôt, utilisez `python3 main.py gui` sous Linux/macOS ou `python main.py gui` sous Windows.
+
+Pour gérer les comptes locaux, changer un mot de passe, gérer les clés API ou supprimer un compte, lancez `python3 main.py admin` sous Linux/macOS ou `python main.py admin` sous Windows.
 
 ## Licence et versions
 

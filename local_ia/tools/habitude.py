@@ -839,6 +839,20 @@ def modifier_habitude(data, nom, modifications):
     print(f"Habitude mise à jour : {h['task']}")
 
 
+def valider_calendrier_habitude(habit):
+    if habit.get("frequency") not in {"daily", "weekly", "monthly"}:
+        raise ValueError("La fréquence de l'habitude n'est pas valide.")
+    if habit["frequency"] == "weekly" and not habit.get("days"):
+        raise ValueError("Précise au moins un jour pour cette habitude hebdomadaire.")
+    if habit["frequency"] == "monthly":
+        day_of_month = habit.get("day_of_month")
+        if isinstance(day_of_month, bool) or not isinstance(day_of_month, int) or not 1 <= day_of_month <= 31:
+            raise ValueError("Précise un jour du mois entre 1 et 31.")
+    requested_time = habit.get("time")
+    if requested_time not in (None, "") and heure_valide(requested_time) is None:
+        raise ValueError("L'heure doit être au format HH:MM.")
+
+
 def use(arguments):
     """Exécute une action d'habitudes sans interaction terminal."""
     action = str(arguments.get("action", "")).strip().casefold()
@@ -847,12 +861,11 @@ def use(arguments):
         "supprimer": "delete", "modifier": "update", "activer": "activate",
         "désactiver": "deactivate", "desactiver": "deactivate",
         "terminer": "complete", "changer_ville": "set_city", "météo": "weather_now",
-        "météo_quotidienne": "weather_daily", "meteo_quotidienne": "weather_daily",
     }
     action = aliases.get(action, action)
-    supported = {"add", "list", "update", "delete", "activate", "deactivate", "complete", "set_city", "weather_now", "weather_daily", "preview"}
+    supported = {"add", "list", "update", "delete", "activate", "deactivate", "complete", "set_city", "weather_now", "preview"}
     if action not in supported:
-        raise ValueError("Action d'habitude inconnue : utilise add, list, update, delete, activate, deactivate, complete, set_city, weather_now ou weather_daily.")
+        raise ValueError("Action d'habitude inconnue : utilise add, list, update, delete, activate, deactivate, complete, set_city, weather_now ou preview.")
 
     data = charger()
     if action == "list":
@@ -870,46 +883,6 @@ def use(arguments):
     if action == "weather_now":
         weather = obtenir_meteo(data.get("ville", VILLE_PAR_DEFAUT))
         return {"action": action, "weather": weather, "error": weather.startswith("Impossible")}
-    if action == "weather_daily":
-        task = "Météo du matin"
-        city = str(data.get("ville", VILLE_PAR_DEFAUT) or VILLE_PAR_DEFAUT)
-        habit = next(
-            (
-                item for item in data["habitudes"]
-                if str(item.get("task", "")).strip().casefold() == task.casefold()
-            ),
-            None,
-        )
-        configured = {
-            "task": task,
-            "frequency": "daily",
-            "days": [],
-            "day_of_month": None,
-            "time": "08:00",
-            "moment": "morning",
-            "type": "weather",
-            "active": True,
-        }
-        normalized = normaliser_habitudes({"habitudes": [configured], "ville": city})["habitudes"][0]
-        if habit is None:
-            data["habitudes"].append(normalized)
-            habit = normalized
-        else:
-            habit.update(normalized)
-
-        weather = obtenir_meteo(city)
-        weather_error = weather.startswith(("Impossible", "Je ne trouve pas"))
-        if not weather_error:
-            habit["last_notified"] = datetime.now().isoformat(timespec="seconds")
-        if not sauver(data):
-            return {"action": action, "error": "Impossible d'enregistrer l'habitude météo."}
-        return {
-            "action": action,
-            "habit": habit,
-            "city": city,
-            "weather": weather,
-            "weather_error": weather_error,
-        }
     if action == "set_city":
         city = str(arguments.get("city", "")).strip()
         if not city:
@@ -926,11 +899,20 @@ def use(arguments):
             name = str(new_habit.get("task") or new_habit.get("tache") or new_habit.get("nom") or "").strip()
             if not name:
                 raise ValueError("Indique le nom de l'habitude.")
+            frequency = str(new_habit.get("frequency", new_habit.get("frequence", ""))).strip().casefold()
+            if frequency not in {
+                "daily", "weekly", "monthly", "quotidien", "quotidienne",
+                "tous les jours", "chaque jour", "hebdomadaire", "chaque semaine",
+                "mensuel", "mensuelle", "chaque mois",
+            }:
+                raise ValueError("La fréquence doit être précisée avant d'enregistrer l'habitude.")
             if trouver_habitude(data, name):
                 raise ValueError(f"L'habitude « {name} » existe déjà.")
             normalized = normaliser_habitudes({"habitudes": [new_habit], "ville": data.get("ville", VILLE_PAR_DEFAUT)})
-            data["habitudes"].append(normalized["habitudes"][0])
-            result = {"action": action, "habit": normalized["habitudes"][0]}
+            normalized_habit = normalized["habitudes"][0]
+            valider_calendrier_habitude(normalized_habit)
+            data["habitudes"].append(normalized_habit)
+            result = {"action": action, "habit": normalized_habit}
         else:
             if habit is None:
                 raise ValueError(f"Je ne trouve pas l'habitude « {task} ».")
@@ -954,6 +936,7 @@ def use(arguments):
                 candidate = dict(habit)
                 candidate.update(changes)
                 normalized = normaliser_habitudes({"habitudes": [candidate], "ville": data.get("ville", VILLE_PAR_DEFAUT)})["habitudes"][0]
+                valider_calendrier_habitude(normalized)
                 duplicate = trouver_habitude(data, normalized["task"])
                 if duplicate is not None and duplicate is not habit and normalized["task"].casefold() != old_name.casefold():
                     raise ValueError(f"L'habitude « {normalized['task']} » existe déjà.")

@@ -13,11 +13,12 @@ import shutil
 import shlex
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from PySide6.QtCore import QEventLoop, QIODevice, QProcess, QProcessEnvironment, QPropertyAnimation, QRegularExpression, QSaveFile, QSettings, QThread, QTimer, QUrl, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QKeySequence, QPixmap, QShortcut, QTextCharFormat, QTextCursor, QSyntaxHighlighter
+from PySide6.QtCore import QEasingCurve, QEventLoop, QIODevice, QItemSelectionModel, QProcess, QProcessEnvironment, QPoint, QPropertyAnimation, QRect, QRegularExpression, QSaveFile, QSettings, QThread, QTimer, QUrl, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPixmap, QShortcut, QTextCharFormat, QTextCursor, QSyntaxHighlighter
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QComboBox,
     QCheckBox,
+    QColorDialog,
     QDialog as _QtDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -36,6 +38,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
     QMessageBox as _QtMessageBox,
     QPlainTextEdit,
     QPushButton,
@@ -47,6 +50,7 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QTabBar,
+    QToolButton,
     QTextBrowser,
     QTreeView,
     QVBoxLayout,
@@ -65,8 +69,10 @@ from local_ia.config.manager import (
     save_config,
 )
 from local_ia import desktop_tray, models as model_catalog, updater
+from local_ia import theme_library
 from local_ia.core import accounts, code_projects, conversation as conversation_store
 from local_ia.core import notifications as app_notifications
+from local_ia.core import tool_health as tool_health_diagnostics
 from local_ia.core.agent import LocalAgent, TOOL_NAMES
 from local_ia.core.context import load_context
 from local_ia.core.tool_manager import ToolManager
@@ -380,7 +386,7 @@ class ConversationMessagesDialog(QDialog):
     def _refresh_messages(self, select_row=0):
         self.messages_list.clear()
         for message in self.chat.get("messages", []):
-            preview = " ".join(str(message.get("content", "")).split())[:100]
+            preview = " ".join(str(message.get("content", "")).split())
             self.messages_list.addItem(f"{message.get('role', 'user')} · {preview}")
         if self.messages_list.count():
             self.messages_list.setCurrentRow(min(max(select_row, 0), self.messages_list.count() - 1))
@@ -394,7 +400,7 @@ class ConversationMessagesDialog(QDialog):
         if not 0 <= row < len(messages):
             return
         message = messages[row]
-        role_index = self.role_picker.findText(str(message.get("role", "user")))
+        role_index = self.role_picker.findText(str(message.get("role", "user")), Qt.MatchFixedString)
         self.role_picker.setCurrentIndex(max(role_index, 0))
         self.content_editor.setPlainText(str(message.get("content", "")))
         self.save_message_button.setEnabled(True)
@@ -436,9 +442,13 @@ class ConversationMessagesDialog(QDialog):
 class ConversationManagerDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("conversationManagerDialog")
         self.setWindowTitle("Gestion des conversations")
-        self.resize(920, 610)
+        self.setMinimumSize(900, 580)
+        self.resize(1180, 760)
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(14)
 
         filters = QHBoxLayout()
         self.search_input = QLineEdit()
@@ -449,16 +459,38 @@ class ConversationManagerDialog(QDialog):
         layout.addLayout(filters)
 
         self.table = QTableWidget(0, 4)
+        self.table.setObjectName("conversationManagerTable")
         self.table.setHorizontalHeaderLabels(("Conversation", "Catégorie", "Messages", "Modifiée"))
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+        self.table.setShowGrid(False)
+        self.table.setWordWrap(False)
+        self.table.horizontalHeader().setObjectName("conversationManagerHeader")
+        self.table.horizontalHeader().setMinimumSectionSize(90)
+        self.table.horizontalHeader().setDefaultSectionSize(150)
         self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setColumnWidth(0, 360)
+        self.table.setColumnWidth(1, 170)
+        self.table.setColumnWidth(2, 100)
+        self.table.setColumnWidth(3, 190)
         self.table.verticalHeader().hide()
         self.table.doubleClicked.connect(self._open_selected)
         layout.addWidget(self.table, stretch=1)
 
+        selection_bar = QHBoxLayout()
+        self.selection_summary = QLabel("Aucune conversation sélectionnée")
+        self.selection_summary.setObjectName("conversationSelectionSummary")
+        selection_bar.addWidget(self.selection_summary, stretch=1)
+        self.select_all_button = QPushButton("Tout sélectionner")
+        self.clear_selection_button = QPushButton("Effacer la sélection")
+        selection_bar.addWidget(self.select_all_button)
+        selection_bar.addWidget(self.clear_selection_button)
+        layout.addLayout(selection_bar)
+
         actions = QHBoxLayout()
+        actions.setSpacing(7)
         self.open_button = QPushButton("Ouvrir")
         self.rename_button = QPushButton("Renommer")
         self.edit_button = QPushButton("Modifier")
@@ -467,6 +499,7 @@ class ConversationManagerDialog(QDialog):
         self.export_button = QPushButton("Exporter")
         self.import_button = QPushButton("Importer")
         self.delete_button = QPushButton("Supprimer")
+        self.delete_button.setObjectName("conversationDeleteButton")
         for button in (
             self.open_button,
             self.rename_button,
@@ -487,6 +520,9 @@ class ConversationManagerDialog(QDialog):
 
         self.search_input.textChanged.connect(self._refresh)
         self.category_filter.currentTextChanged.connect(self._refresh)
+        self.table.itemSelectionChanged.connect(self._update_selection_state)
+        self.select_all_button.clicked.connect(self.table.selectAll)
+        self.clear_selection_button.clicked.connect(self.table.clearSelection)
         self.open_button.clicked.connect(self._open_selected)
         self.rename_button.clicked.connect(self._rename_selected)
         self.edit_button.clicked.connect(self._edit_selected)
@@ -497,7 +533,8 @@ class ConversationManagerDialog(QDialog):
         self.delete_button.clicked.connect(self._delete_selected)
         self._refresh()
 
-    def _refresh(self, *_args, selected_id=None):
+    def _refresh(self, *_args, selected_ids=None):
+        selected = set(selected_ids if selected_ids is not None else self._selected_ids())
         chats = conversation_store.list_chats()
         category = self.category_filter.currentText() if self.category_filter.count() else "Toutes les catégories"
         categories = sorted({chat.get("category", "").strip() for chat in chats if chat.get("category", "").strip()}, key=str.casefold)
@@ -509,39 +546,70 @@ class ConversationManagerDialog(QDialog):
         self.category_filter.blockSignals(False)
 
         query = self.search_input.text().strip().casefold()
-        selected_row = -1
+        self.table.blockSignals(True)
         self.table.setRowCount(0)
         for chat in chats:
             title = self._display_title(chat)
             chat_category = str(chat.get("category") or "")
             if self.category_filter.currentText() != "Toutes les catégories" and chat_category != self.category_filter.currentText():
                 continue
-            searchable = " ".join(
-                [title, chat_category, *(str(item.get("content", "")) for item in chat.get("messages", []))]
-            ).casefold()
+            searchable = f"{title} {chat_category} {' '.join(str(item.get('content', '')) for item in chat.get('messages', []))}".casefold()
             if query and query not in searchable:
                 continue
             row = self.table.rowCount()
             self.table.insertRow(row)
+            self.table.setRowHeight(row, 48)
             title_item = QTableWidgetItem(title)
             title_item.setData(Qt.ItemDataRole.UserRole, int(chat["id"]))
             self.table.setItem(row, 0, title_item)
             self.table.setItem(row, 1, QTableWidgetItem(chat_category or "—"))
             self.table.setItem(row, 2, QTableWidgetItem(str(len(chat.get("messages", [])))))
             self.table.setItem(row, 3, QTableWidgetItem(str(chat.get("updated_at") or "")))
-            if selected_id is not None and chat["id"] == selected_id:
-                selected_row = row
-        if self.table.rowCount():
-            self.table.selectRow(selected_row if selected_row >= 0 else 0)
+            if int(chat["id"]) in selected:
+                self.table.selectionModel().select(
+                    self.table.model().index(row, 0),
+                    QItemSelectionModel.SelectionFlag.Select
+                    | QItemSelectionModel.SelectionFlag.Rows,
+                )
+        self.table.blockSignals(False)
+        self._update_selection_state()
 
     @staticmethod
     def _display_title(chat):
         return str(chat.get("custom_title") or chat.get("topic") or chat.get("title") or f"Conversation #{chat['id']}")
 
+    def _selected_ids(self):
+        rows = sorted({index.row() for index in self.table.selectionModel().selectedRows()})
+        selected_ids = []
+        for row in rows:
+            item = self.table.item(row, 0)
+            if item is not None:
+                selected_ids.append(int(item.data(Qt.ItemDataRole.UserRole)))
+        return selected_ids
+
     def _selected_id(self):
-        row = self.table.currentRow()
-        item = self.table.item(row, 0) if row >= 0 else None
-        return item.data(Qt.ItemDataRole.UserRole) if item else None
+        selected_ids = self._selected_ids()
+        return selected_ids[0] if len(selected_ids) == 1 else None
+
+    def _update_selection_state(self):
+        count = len(self._selected_ids())
+        if count == 0:
+            self.selection_summary.setText("Aucune conversation sélectionnée")
+        else:
+            self.selection_summary.setText(
+                f"{count} conversation{'s' if count > 1 else ''} sélectionnée{'s' if count > 1 else ''}"
+            )
+        single_selection = count == 1
+        multiple_or_single = count > 0
+        for button in (self.open_button, self.rename_button, self.edit_button):
+            button.setEnabled(single_selection)
+        for button in (
+            self.category_button,
+            self.copy_button,
+            self.export_button,
+            self.delete_button,
+        ):
+            button.setEnabled(multiple_or_single)
 
     def _selected_chat(self):
         chat_id = self._selected_id()
@@ -579,27 +647,34 @@ class ConversationManagerDialog(QDialog):
             QMessageBox.warning(self, "Renommage impossible", str(error))
             return
         self._sync_parent(chat["id"])
-        self._refresh(selected_id=chat["id"])
+        self._refresh(selected_ids=[chat["id"]])
 
     def _classify_selected(self):
-        chat = self._selected_chat()
+        chat_ids = self._selected_ids()
+        if not chat_ids:
+            return
+        chat = conversation_store.load_chat(chat_ids[0])
         if chat is None:
             return
+        subject = "cette conversation" if len(chat_ids) == 1 else f"ces {len(chat_ids)} conversations"
         category, accepted = QInputDialog.getText(
             self,
-            "Classer la conversation",
-            "Catégorie (laisser vide pour retirer)",
+            "Classer les conversations",
+            f"Catégorie pour {subject} (laisser vide pour retirer)",
             text=str(chat.get("category") or ""),
         )
         if not accepted:
             return
-        try:
-            conversation_store.set_chat_category(chat["id"], category)
-        except (OSError, ValueError) as error:
-            QMessageBox.warning(self, "Classement impossible", str(error))
-            return
-        self._sync_parent(chat["id"])
-        self._refresh(selected_id=chat["id"])
+        failures = []
+        for chat_id in chat_ids:
+            try:
+                conversation_store.set_chat_category(chat_id, category)
+                self._sync_parent(chat_id)
+            except (OSError, ValueError) as error:
+                failures.append(f"#{chat_id} : {error}")
+        self._refresh(selected_ids=chat_ids)
+        if failures:
+            QMessageBox.warning(self, "Classement partiel", "\n".join(failures))
 
     def _edit_selected(self):
         chat = self._selected_chat()
@@ -614,35 +689,64 @@ class ConversationManagerDialog(QDialog):
             QMessageBox.warning(self, "Modification impossible", str(error))
             return
         self._sync_parent(chat["id"])
-        self._refresh(selected_id=chat["id"])
+        self._refresh(selected_ids=[chat["id"]])
 
     def _copy_selected(self):
-        chat_id = self._selected_id()
-        if chat_id is None:
+        chat_ids = self._selected_ids()
+        if not chat_ids:
             return
-        try:
-            duplicate = conversation_store.copy_chat(chat_id)
-        except (OSError, ValueError) as error:
-            QMessageBox.warning(self, "Copie impossible", str(error))
-            return
-        self._refresh(selected_id=duplicate["id"])
+        duplicate_ids = []
+        failures = []
+        for chat_id in chat_ids:
+            try:
+                duplicate = conversation_store.copy_chat(chat_id)
+                duplicate_ids.append(duplicate["id"])
+            except (OSError, ValueError) as error:
+                failures.append(f"#{chat_id} : {error}")
+        self._refresh(selected_ids=duplicate_ids)
+        if failures:
+            QMessageBox.warning(self, "Copie partielle", "\n".join(failures))
 
     def _export_selected(self):
-        chat = self._selected_chat()
-        if chat is None:
+        chat_ids = self._selected_ids()
+        if not chat_ids:
             return
-        suggested_name = f"conversation-{chat['id']}.json"
-        destination, _selected_filter = QFileDialog.getSaveFileName(
-            self, "Exporter la conversation", suggested_name, "Conversations JSON (*.json)"
+        if len(chat_ids) == 1:
+            destination, _selected_filter = QFileDialog.getSaveFileName(
+                self,
+                "Exporter la conversation",
+                f"conversation-{chat_ids[0]}.json",
+                "Conversations JSON (*.json)",
+            )
+            if not destination:
+                return
+            try:
+                conversation_store.export_chat(chat_ids[0], destination)
+            except (OSError, ValueError) as error:
+                QMessageBox.warning(self, "Export impossible", str(error))
+                return
+        else:
+            destination = QFileDialog.getExistingDirectory(
+                self, "Choisir le dossier d’export des conversations"
+            )
+            if not destination:
+                return
+            failures = []
+            for chat_id in chat_ids:
+                try:
+                    conversation_store.export_chat(
+                        chat_id, Path(destination) / f"conversation-{chat_id}.json"
+                    )
+                except (OSError, ValueError) as error:
+                    failures.append(f"#{chat_id} : {error}")
+            if failures:
+                QMessageBox.warning(self, "Export partiel", "\n".join(failures))
+                return
+        QMessageBox.information(
+            self,
+            "Export terminé",
+            f"{len(chat_ids)} conversation{'s' if len(chat_ids) > 1 else ''} exportée{'s' if len(chat_ids) > 1 else ''}.",
         )
-        if not destination:
-            return
-        try:
-            conversation_store.export_chat(chat["id"], destination)
-        except (OSError, ValueError) as error:
-            QMessageBox.warning(self, "Export impossible", str(error))
-            return
-        QMessageBox.information(self, "Export terminé", "La conversation a été exportée.")
 
     def _import_conversation(self):
         source, _selected_filter = QFileDialog.getOpenFileName(
@@ -655,31 +759,42 @@ class ConversationManagerDialog(QDialog):
         except (OSError, ValueError) as error:
             QMessageBox.warning(self, "Import impossible", str(error))
             return
-        self._refresh(selected_id=chat["id"])
+        self._refresh(selected_ids=[chat["id"]])
 
     def _delete_selected(self):
-        chat_id = self._selected_id()
-        if chat_id is None:
+        chat_ids = self._selected_ids()
+        if not chat_ids:
             return
+        title = "Supprimer la conversation" if len(chat_ids) == 1 else "Supprimer les conversations"
+        target = "cette conversation et tous ses messages" if len(chat_ids) == 1 else f"ces {len(chat_ids)} conversations et tous leurs messages"
         answer = QMessageBox.question(
             self,
-            "Supprimer la conversation",
-            "Supprimer définitivement cette conversation et tous ses messages ?",
+            title,
+            f"Supprimer définitivement {target} ?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        if not conversation_store.delete_chat(chat_id):
-            QMessageBox.warning(self, "Suppression impossible", "Cette conversation est introuvable.")
-            self._refresh()
-            return
         parent = self.parent()
         parent_chat = getattr(parent, "chat", None)
         new_chat = getattr(parent, "_new_chat", None)
-        if isinstance(parent_chat, dict) and parent_chat.get("id") == chat_id and callable(new_chat):
+        deleted_current = isinstance(parent_chat, dict) and parent_chat.get("id") in chat_ids
+        deleted = []
+        failures = []
+        for chat_id in chat_ids:
+            try:
+                if conversation_store.delete_chat(chat_id):
+                    deleted.append(chat_id)
+                else:
+                    failures.append(f"#{chat_id} : conversation introuvable")
+            except OSError as error:
+                failures.append(f"#{chat_id} : {error}")
+        if deleted_current and deleted and callable(new_chat):
             new_chat()
         self._refresh()
+        if failures:
+            QMessageBox.warning(self, "Suppression partielle", "\n".join(failures))
 
 
 class CodeProjectManagerDialog(QDialog):
@@ -1549,6 +1664,14 @@ class KairoWorkspace(QMainWindow):
         self._tool_health_output = ""
         self._tool_health_error_output = ""
         self._tool_health_error_reported = False
+        self._tool_health_report = {
+            "checks": [],
+            "issues": [],
+            "checked": 0,
+            "passed": 0,
+            "stderr": "",
+            "exit_code": None,
+        }
         self._active_notification_kind = "habit"
         self._python_output = ""
         self._python_filename = ""
@@ -1600,46 +1723,74 @@ class KairoWorkspace(QMainWindow):
 
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(244)
+        sidebar.setFixedWidth(52)
         side = QVBoxLayout(sidebar)
-        side.setContentsMargins(18, 22, 16, 18)
-        side.setSpacing(9)
-
-        brand = QLabel("◈  KAIRO")
-        brand.setObjectName("brand")
-        side.addWidget(brand)
-        tagline = QLabel("ESPACE API")
-        tagline.setObjectName("tagline")
-        side.addWidget(tagline)
-        side.addSpacing(20)
-
-        self.notifications_button = ActionButton("♧   Gérer les notifications")
-        self.notifications_button.clicked.connect(self._open_notification_settings)
-        side.addWidget(self.notifications_button)
+        side.setContentsMargins(5, 14, 5, 14)
+        side.setSpacing(0)
 
         self.conversation_section = QWidget(sidebar)
         conversation_layout = QVBoxLayout(self.conversation_section)
         conversation_layout.setContentsMargins(0, 0, 0, 0)
         conversation_layout.setSpacing(9)
-        self.new_chat_button = ActionButton("＋   Nouveau chat")
-        self.new_chat_button.clicked.connect(self._new_chat)
-        conversation_layout.addWidget(self.new_chat_button)
-        self.manage_conversations_button = ActionButton("☷   Gérer les conversations")
-        self.manage_conversations_button.clicked.connect(self._manage_conversations)
-        conversation_layout.addWidget(self.manage_conversations_button)
+        self.conversation_toggle = QToolButton()
+        self.conversation_toggle.setObjectName("conversationToggle")
+        self.conversation_toggle.setText("☰")
+        self.conversation_toggle.setToolTip("Ouvrir l’historique des conversations")
+        self.conversation_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.conversation_toggle.setFixedSize(42, 42)
+        self.conversation_toggle.setArrowType(Qt.ArrowType.RightArrow)
+        self.conversation_toggle.setCheckable(True)
+        self.conversation_toggle.setChecked(False)
+        self.conversation_toggle.toggled.connect(self._toggle_conversation_menu)
+        conversation_layout.addWidget(self.conversation_toggle)
+        side.addWidget(self.conversation_section)
+        side.addStretch(1)
+
+        self.sidebar = sidebar
+        self.conversation_drawer = QWidget(root)
+        self.conversation_drawer.setObjectName("conversationDrawer")
+        self.conversation_drawer_width = 340
+        self.conversation_drawer.setMaximumWidth(self.conversation_drawer_width)
+        drawer_layout = QVBoxLayout(self.conversation_drawer)
+        drawer_layout.setContentsMargins(16, 14, 16, 16)
+        drawer_layout.setSpacing(10)
+        drawer_header = QHBoxLayout()
+        drawer_title = QLabel("Conversations")
+        drawer_title.setObjectName("drawerTitle")
+        drawer_header.addWidget(drawer_title, stretch=1)
+        self.conversation_close_button = QToolButton()
+        self.conversation_close_button.setObjectName("notificationClose")
+        self.conversation_close_button.setText("×")
+        self.conversation_close_button.setToolTip("Fermer l’historique")
+        self.conversation_close_button.setAutoRaise(True)
+        self.conversation_close_button.clicked.connect(
+            lambda: self.conversation_toggle.setChecked(False)
+        )
+        drawer_header.addWidget(self.conversation_close_button)
+        drawer_layout.addLayout(drawer_header)
+        self.drawer_new_chat_button = ActionButton(
+            "＋   Nouvelle conversation", "drawerNewChatButton"
+        )
+        self.drawer_new_chat_button.clicked.connect(self._new_chat_from_drawer)
+        drawer_layout.addWidget(self.drawer_new_chat_button)
         self.chat_search = QLineEdit()
         self.chat_search.setPlaceholderText("Rechercher une conversation")
         self.chat_search.textChanged.connect(self._refresh_chat_list)
-        conversation_layout.addWidget(self.chat_search)
-        chat_heading = QLabel("CONVERSATIONS")
-        chat_heading.setObjectName("sectionLabel")
-        conversation_layout.addWidget(chat_heading)
+        drawer_layout.addWidget(self.chat_search)
         self.chat_list = QListWidget()
         self.chat_list.setObjectName("chatList")
         self.chat_list.itemActivated.connect(self._open_chat_item)
         self.chat_list.itemClicked.connect(self._open_chat_item)
-        conversation_layout.addWidget(self.chat_list, stretch=1)
-        side.addWidget(self.conversation_section, stretch=1)
+        drawer_layout.addWidget(self.chat_list, stretch=1)
+        self.conversation_drawer.hide()
+        self.conversation_drawer_animation = QPropertyAnimation(
+            self.conversation_drawer, b"geometry", self
+        )
+        self.conversation_drawer_animation.setDuration(260)
+        self.conversation_drawer_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.conversation_drawer_animation.finished.connect(
+            self._conversation_drawer_animation_finished
+        )
 
         self.files_section = QWidget(sidebar)
         files_layout = QVBoxLayout(self.files_section)
@@ -1676,7 +1827,6 @@ class KairoWorkspace(QMainWindow):
         self.file_tree.doubleClicked.connect(self._preview_file)
         self.file_tree.setMinimumHeight(165)
         files_layout.addWidget(self.file_tree, stretch=1)
-        side.addWidget(self.files_section, stretch=1)
 
         self.manage_keys_button = ActionButton("⚿   Gérer les clés API", parent=self)
         self.manage_keys_button.clicked.connect(self._manage_api_keys)
@@ -1693,10 +1843,6 @@ class KairoWorkspace(QMainWindow):
         self.install_button = ActionButton("↓   Installer une application", parent=self)
         self.install_button.clicked.connect(self._install_catalog_application)
         self.install_button.hide()
-        self.settings_button = ActionButton("⚙   Paramètres")
-        self.settings_button.clicked.connect(self._open_settings)
-        side.addStretch(1)
-        side.addWidget(self.settings_button)
         root_layout.addWidget(sidebar)
 
         main = QWidget()
@@ -1704,26 +1850,44 @@ class KairoWorkspace(QMainWindow):
         main_layout = QVBoxLayout(main)
         main_layout.setContentsMargins(25, 20, 25, 20)
         main_layout.setSpacing(14)
-        self.habit_notification_banner = QPushButton()
+        self.habit_notification_banner = QPushButton(self)
         self.habit_notification_banner.setObjectName("habitNotificationBanner")
         self.habit_notification_banner.setCursor(Qt.CursorShape.PointingHandCursor)
         self.habit_notification_banner.setVisible(False)
+        self.habit_notification_banner.setFixedWidth(400)
         banner_layout = QVBoxLayout(self.habit_notification_banner)
         banner_layout.setContentsMargins(14, 9, 14, 9)
-        banner_layout.setSpacing(2)
+        banner_layout.setSpacing(7)
+        banner_header = QHBoxLayout()
         self.habit_notification_title = QLabel()
         self.habit_notification_title.setObjectName("habitNotificationTitle")
-        self.habit_notification_message = QLabel()
+        banner_header.addWidget(self.habit_notification_title, stretch=1)
+        self.habit_notification_close = QToolButton(self.habit_notification_banner)
+        self.habit_notification_close.setObjectName("notificationClose")
+        self.habit_notification_close.setText("×")
+        self.habit_notification_close.setToolTip("Fermer la notification")
+        self.habit_notification_close.setAutoRaise(True)
+        self.habit_notification_close.clicked.connect(self._dismiss_notification)
+        banner_header.addWidget(self.habit_notification_close)
+        banner_layout.addLayout(banner_header)
+        self.habit_notification_message = QTextBrowser()
         self.habit_notification_message.setObjectName("habitNotificationMessage")
-        self.habit_notification_message.setWordWrap(True)
-        banner_layout.addWidget(self.habit_notification_title)
+        self.habit_notification_message.setReadOnly(True)
+        self.habit_notification_message.setFrameShape(QTextBrowser.Shape.NoFrame)
+        self.habit_notification_message.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.habit_notification_message.setFixedHeight(74)
         banner_layout.addWidget(self.habit_notification_message)
         self.habit_notification_banner.clicked.connect(self._open_habits_from_notification)
+        self._notification_animation_direction = "in"
+        self.notification_animation = QPropertyAnimation(
+            self.habit_notification_banner, b"pos", self
+        )
+        self.notification_animation.setDuration(320)
+        self.notification_animation.finished.connect(self._notification_animation_finished)
         self.habit_notification_timer = QTimer(self)
         self.habit_notification_timer.setSingleShot(True)
-        self.habit_notification_timer.setInterval(5000)
-        self.habit_notification_timer.timeout.connect(self.habit_notification_banner.hide)
-        main_layout.addWidget(self.habit_notification_banner)
+        self.habit_notification_timer.setInterval(6500)
+        self.habit_notification_timer.timeout.connect(self._dismiss_notification)
         header = QHBoxLayout()
         titles = QVBoxLayout()
         self.chat_title = QLabel("Nouvelle conversation")
@@ -1743,27 +1907,34 @@ class KairoWorkspace(QMainWindow):
         self.compare_button.setToolTip("Afficher une autre conversation côte à côte")
         self.compare_button.clicked.connect(self._toggle_comparison)
         header.addWidget(self.compare_button)
-        self.profile_avatar = QLabel()
+        self.profile_avatar = QToolButton()
         self.profile_avatar.setObjectName("profileAvatar")
         self.profile_avatar.setFixedSize(38, 38)
-        self.profile_avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.profile_avatar.hide()
+        self.profile_avatar.setText("♙")
+        self.profile_avatar.setToolTip("Ouvrir le menu du compte")
+        self.profile_avatar.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        profile_menu = QMenu(self.profile_avatar)
+        account_action = profile_menu.addAction("Compte")
+        account_action.triggered.connect(lambda: self._open_settings("Compte"))
+        conversations_action = profile_menu.addAction("Conversation")
+        conversations_action.triggered.connect(self._manage_conversations)
+        settings_action = profile_menu.addAction("Paramètre")
+        settings_action.triggered.connect(self._open_settings)
+        self.profile_avatar.setMenu(profile_menu)
         header.addWidget(self.profile_avatar, alignment=Qt.AlignmentFlag.AlignVCenter)
-        self.status = QLabel("●  Connexion OpenRouter requise")
-        self.status.setObjectName("status")
-        header.addWidget(self.status, alignment=Qt.AlignmentFlag.AlignVCenter)
-        self.connect_button = ActionButton("Se connecter", "connectButton")
-        self.connect_button.clicked.connect(self._connect_account)
-        header.addWidget(self.connect_button, alignment=Qt.AlignmentFlag.AlignVCenter)
-        main_layout.addLayout(header)
 
         self.tool_navigation = QTabBar()
         self.tool_navigation.setObjectName("toolNavigation")
         self.tool_navigation.setDrawBase(False)
         self.tool_navigation.setExpanding(False)
-        for label in ("Conversation", "Traducteur", "Habitudes", "Calculatrice", "Web"):
-            self.tool_navigation.addTab(label)
+        self.tool_navigation.setUsesScrollButtons(True)
+        self.tool_navigation.setElideMode(Qt.TextElideMode.ElideRight)
+        self.tool_navigation.setMinimumHeight(46)
+        for label in ("Conversation", "Traducteur", "Habitudes", "Calculatrice", "Web", "Erreurs outils"):
+            index = self.tool_navigation.addTab(label)
+            self.tool_navigation.setTabToolTip(index, label)
         main_layout.addWidget(self.tool_navigation)
+        main_layout.addLayout(header)
 
         self.workspace_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.workspace_splitter.setObjectName("workspaceSplitter")
@@ -1773,6 +1944,38 @@ class KairoWorkspace(QMainWindow):
         chat_layout.setContentsMargins(0, 0, 8, 0)
         chat_layout.setSpacing(12)
 
+        self.chat_content_stack = QStackedWidget()
+        self.welcome_page = QWidget()
+        self.welcome_page.setObjectName("welcomePage")
+        welcome_layout = QVBoxLayout(self.welcome_page)
+        welcome_layout.setContentsMargins(20, 20, 20, 20)
+        welcome_layout.setSpacing(22)
+        welcome_layout.addStretch(1)
+        welcome_actions = QHBoxLayout()
+        welcome_actions.addStretch(1)
+        self.open_conversation_button = QPushButton("Ouvrir une conversation")
+        self.open_conversation_button.setObjectName("welcomeSecondaryButton")
+        self.open_conversation_button.clicked.connect(self._manage_conversations)
+        welcome_actions.addWidget(self.open_conversation_button)
+        self.start_conversation_button = QPushButton("Commencer une conversation")
+        self.start_conversation_button.setObjectName("welcomePrimaryButton")
+        self.start_conversation_button.clicked.connect(self._new_chat)
+        welcome_actions.addWidget(self.start_conversation_button)
+        welcome_actions.addStretch(1)
+        welcome_layout.addLayout(welcome_actions)
+        self.welcome_label = QLabel("Ravi de vous revoir, vous")
+        self.welcome_label.setObjectName("welcomeGreeting")
+        self.welcome_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.welcome_label.setWordWrap(True)
+        welcome_layout.addWidget(self.welcome_label)
+        welcome_layout.addStretch(1)
+        self.chat_content_stack.addWidget(self.welcome_page)
+
+        conversation_page = QWidget()
+        conversation_layout = QVBoxLayout(conversation_page)
+        conversation_layout.setContentsMargins(0, 0, 0, 0)
+        conversation_layout.setSpacing(12)
+
         self.transcript = QTextBrowser()
         self.transcript.setObjectName("transcript")
         self.transcript.setReadOnly(True)
@@ -1780,7 +1983,7 @@ class KairoWorkspace(QMainWindow):
         self.transcript.setOpenExternalLinks(True)
         self._transcript_messages = []
         self.transcript.setMarkdown("*Pose une question ou choisis une action à gauche.*")
-        chat_layout.addWidget(self.transcript, stretch=1)
+        conversation_layout.addWidget(self.transcript, stretch=1)
         self.downloads_panel = QWidget()
         downloads_layout = QHBoxLayout(self.downloads_panel)
         downloads_layout.setContentsMargins(0, 0, 0, 0)
@@ -1791,10 +1994,10 @@ class KairoWorkspace(QMainWindow):
         self.download_buttons_layout.addStretch(1)
         downloads_layout.addWidget(self.download_buttons_host, stretch=1)
         self.downloads_panel.hide()
-        chat_layout.addWidget(self.downloads_panel)
+        conversation_layout.addWidget(self.downloads_panel)
         self.notice = QLabel("Prêt")
         self.notice.setObjectName("notice")
-        chat_layout.addWidget(self.notice)
+        conversation_layout.addWidget(self.notice)
         composer = QHBoxLayout()
         composer.setSpacing(10)
         self.prompt = QLineEdit()
@@ -1805,7 +2008,10 @@ class KairoWorkspace(QMainWindow):
         self.send_button.clicked.connect(self._send_message)
         composer.addWidget(self.prompt, stretch=1)
         composer.addWidget(self.send_button)
-        chat_layout.addLayout(composer)
+        conversation_layout.addLayout(composer)
+        self.chat_content_stack.addWidget(conversation_page)
+        self.chat_content_stack.setCurrentWidget(self.welcome_page)
+        chat_layout.addWidget(self.chat_content_stack, stretch=1)
         self.workspace_splitter.addWidget(self.chat_panel)
 
         self.editor_panel = QWidget()
@@ -1847,7 +2053,14 @@ class KairoWorkspace(QMainWindow):
         self.preview_browser.setOpenLinks(False)
         self.editor_tabs.addTab(self.preview_browser, "Aperçu")
         self.editor_tabs.setTabVisible(1, False)
-        editor_layout.addWidget(self.editor_tabs, stretch=1)
+        self.editor_content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.editor_content_splitter.setObjectName("editorContentSplitter")
+        self.editor_content_splitter.addWidget(self.files_section)
+        self.editor_content_splitter.addWidget(self.editor_tabs)
+        self.editor_content_splitter.setStretchFactor(0, 1)
+        self.editor_content_splitter.setStretchFactor(1, 3)
+        self.editor_content_splitter.setSizes([210, 590])
+        editor_layout.addWidget(self.editor_content_splitter, stretch=1)
         self.editor_status = QLabel("Aucun fichier ouvert")
         self.editor_status.setObjectName("editorStatus")
         editor_layout.addWidget(self.editor_status)
@@ -1883,6 +2096,7 @@ class KairoWorkspace(QMainWindow):
         self._build_habits_page()
         self._build_calculator_page()
         self._build_web_page()
+        self._build_tool_health_page()
         self.tool_navigation.currentChanged.connect(self._select_tool_page)
         main_layout.addWidget(self.tool_page_stack, stretch=1)
         mode_footer = QHBoxLayout()
@@ -1904,7 +2118,7 @@ class KairoWorkspace(QMainWindow):
         self.close_shortcut = QShortcut(QKeySequence("Ctrl+W"), self)
         self.close_shortcut.activated.connect(self._close_current_view)
         self.search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
-        self.search_shortcut.activated.connect(self.chat_search.setFocus)
+        self.search_shortcut.activated.connect(self._open_conversation_search)
         self.prompt_shortcut = QShortcut(QKeySequence("Ctrl+L"), self)
         self.prompt_shortcut.activated.connect(self.prompt.setFocus)
 
@@ -2124,11 +2338,51 @@ class KairoWorkspace(QMainWindow):
         self._browser_started = False
         self.tool_page_stack.addWidget(page)
 
+    def _build_tool_health_page(self):
+        page, layout = self._new_tool_page("Erreurs outils")
+        toolbar = QHBoxLayout()
+        self.tool_health_summary = QLabel("Aucun diagnostic exécuté.")
+        self.tool_health_summary.setObjectName("mutedText")
+        toolbar.addWidget(self.tool_health_summary, stretch=1)
+        self.tool_health_refresh_button = ActionButton("Relancer le diagnostic")
+        self.tool_health_refresh_button.clicked.connect(self._start_startup_tool_health_check)
+        toolbar.addWidget(self.tool_health_refresh_button)
+        layout.addLayout(toolbar)
+
+        details = QSplitter(Qt.Orientation.Horizontal)
+        self.tool_health_table = QTableWidget(0, 3)
+        self.tool_health_table.setObjectName("toolHealthTable")
+        self.tool_health_table.setHorizontalHeaderLabels(("Outil", "État", "Explication"))
+        self.tool_health_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tool_health_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.tool_health_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tool_health_table.verticalHeader().hide()
+        self.tool_health_table.horizontalHeader().setStretchLastSection(True)
+        self.tool_health_table.currentCellChanged.connect(self._show_selected_tool_health_log)
+        details.addWidget(self.tool_health_table)
+
+        log_panel = QWidget()
+        log_layout = QVBoxLayout(log_panel)
+        log_layout.setContentsMargins(8, 0, 0, 0)
+        log_layout.addWidget(QLabel("Log détaillé"))
+        self.tool_health_log = QPlainTextEdit()
+        self.tool_health_log.setObjectName("toolHealthLog")
+        self.tool_health_log.setReadOnly(True)
+        self.tool_health_log.setPlaceholderText("Sélectionne un outil pour consulter son résultat détaillé.")
+        log_layout.addWidget(self.tool_health_log, stretch=1)
+        details.addWidget(log_panel)
+        details.setStretchFactor(0, 2)
+        details.setStretchFactor(1, 3)
+        layout.addWidget(details, stretch=1)
+        self.tool_page_stack.addWidget(page)
+        self._render_tool_health_report()
+
     def _select_tool_page(self, index):
         self.tool_page_stack.setCurrentIndex(index)
-        titles = ("Nouvelle conversation", "Traducteur", "Habitudes", "Calculatrice", "Navigateur Web")
+        titles = ("Nouvelle conversation", "Traducteur", "Habitudes", "Calculatrice", "Navigateur Web", "Erreurs outils")
         subtitles = (
             "Votre espace de discussion avec KAIRO",
+            "",
             "",
             "",
             "",
@@ -2143,6 +2397,8 @@ class KairoWorkspace(QMainWindow):
             self._refresh_habits()
         elif index == 4 and not self._browser_started:
             self._browser_home()
+        elif index == 5:
+            self._render_tool_health_report()
 
     def _poll_habit_notifications(self):
         try:
@@ -2152,19 +2408,14 @@ class KairoWorkspace(QMainWindow):
         if not events:
             return
         habit_events = [event for event in events if event.get("kind") == "habit"]
-        tool_health_events = [event for event in events if event.get("kind") == "tool_health"]
+        conversation_updated = False
         for event in habit_events:
             add_chat_message(
                 self.chat,
                 "assistant",
                 f"Habitude · {event.get('title', 'KAIRO')}\n{event.get('message', '')}",
             )
-        for event in tool_health_events:
-            add_chat_message(
-                self.chat,
-                "assistant",
-                f"Diagnostic des outils au démarrage\n{event.get('message', '')}",
-            )
+            conversation_updated = True
         known_kinds = {"habit", "tool_health"}
         for event in events:
             if event.get("kind") not in known_kinds:
@@ -2173,7 +2424,9 @@ class KairoWorkspace(QMainWindow):
                     "assistant",
                     f"{event.get('title', 'Notification KAIRO')}\n{event.get('message', '')}",
                 )
-        self._load_chat_into_view()
+                conversation_updated = True
+        if conversation_updated:
+            self._load_chat_into_view()
         self._refresh_chat_list()
         event = events[-1]
         self._active_notification_kind = event.get("kind", "habit")
@@ -2184,20 +2437,75 @@ class KairoWorkspace(QMainWindow):
         else:
             title = str(event.get("title", "Notification KAIRO"))
         self.habit_notification_title.setText(title)
-        self.habit_notification_message.setText(str(event.get("message", "")))
-        self.habit_notification_banner.setVisible(True)
-        self.habit_notification_banner.raise_()
-        self.habit_notification_timer.start(5000)
+        self.habit_notification_message.setPlainText(str(event.get("message", "")))
+        self._show_notification()
 
     def _open_habits_from_notification(self):
-        self.habit_notification_timer.stop()
-        self.habit_notification_banner.hide()
+        self._dismiss_notification()
         self.page_stack.setCurrentIndex(0)
-        self.tool_navigation.setCurrentIndex(2 if self._active_notification_kind == "habit" else 0)
+        page_index = 5 if self._active_notification_kind == "tool_health" else 2 if self._active_notification_kind == "habit" else 0
+        self.tool_navigation.setCurrentIndex(page_index)
+
+    def _show_notification(self):
+        banner = self.habit_notification_banner
+        self.habit_notification_timer.stop()
+        self.notification_animation.stop()
+        banner.setFixedWidth(max(280, min(420, self.width() - 32)))
+        banner.adjustSize()
+        banner.layout().activate()
+        banner.setFixedHeight(max(112, banner.layout().sizeHint().height()))
+        target = QPoint(max(16, self.width() - banner.width() - 20), 16)
+        start = QPoint(self.width() + 16, target.y())
+        banner.move(start)
+        banner.show()
+        banner.raise_()
+        self._notification_animation_direction = "in"
+        self.notification_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.notification_animation.setStartValue(start)
+        self.notification_animation.setEndValue(target)
+        self.notification_animation.start()
+        self.habit_notification_timer.start()
+
+    def _dismiss_notification(self):
+        banner = self.habit_notification_banner
+        self.habit_notification_timer.stop()
+        if not banner.isVisible():
+            return
+        self.notification_animation.stop()
+        self._notification_animation_direction = "out"
+        self.notification_animation.setEasingCurve(QEasingCurve.Type.InCubic)
+        self.notification_animation.setStartValue(banner.pos())
+        self.notification_animation.setEndValue(QPoint(self.width() + 16, banner.y()))
+        self.notification_animation.start()
+
+    def _notification_animation_finished(self):
+        if self._notification_animation_direction == "out":
+            self.habit_notification_banner.hide()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        banner = getattr(self, "habit_notification_banner", None)
+        if (
+            banner is not None
+            and banner.isVisible()
+            and self._notification_animation_direction != "out"
+        ):
+            banner.move(QPoint(max(16, self.width() - banner.width() - 20), 16))
+        drawer = getattr(self, "conversation_drawer", None)
+        toggle = getattr(self, "conversation_toggle", None)
+        if drawer is not None and toggle is not None and toggle.isChecked():
+            drawer.setGeometry(
+                self.sidebar.width(),
+                12,
+                self.conversation_drawer_width,
+                max(120, self.centralWidget().widget(0).height() - 24),
+            )
 
     def _start_startup_tool_health_check(self):
         if self.tool_health_process is not None and self.tool_health_process.state() != QProcess.ProcessState.NotRunning:
             return
+        self.tool_health_summary.setText("Diagnostic des outils en cours…")
+        self.tool_health_refresh_button.setEnabled(False)
         self._tool_health_output = ""
         self._tool_health_error_output = ""
         self._tool_health_error_reported = False
@@ -2244,10 +2552,22 @@ class KairoWorkspace(QMainWindow):
     def _startup_tool_health_process_error(self, error):
         if error == QProcess.ProcessError.FailedToStart and not self._tool_health_error_reported:
             self._tool_health_error_reported = True
-            self._publish_tool_health_issues([{
+            issue = {
                 "tool": "startup",
+                "status": "failed",
                 "detail": "Impossible de démarrer le processus de diagnostic.",
-            }], checked=0)
+            }
+            self._tool_health_report = {
+                "checks": [issue],
+                "issues": [issue],
+                "checked": 0,
+                "passed": 0,
+                "stderr": self._tool_health_error_output,
+                "exit_code": None,
+            }
+            self.tool_health_refresh_button.setEnabled(True)
+            self._render_tool_health_report()
+            self._publish_tool_health_issues([issue], checked=0)
 
     def _startup_tool_health_finished(self, exit_code, _exit_status):
         self._read_tool_health_output()
@@ -2262,16 +2582,134 @@ class KairoWorkspace(QMainWindow):
             detail = f"Résultat du diagnostic illisible : {error}."
             if self._tool_health_error_output.strip():
                 detail += f"\n{self._tool_health_error_output.strip()[-1200:]}"
-            self._publish_tool_health_issues([{"tool": "startup", "detail": detail}], checked=0)
+            issue = {"tool": "startup", "status": "failed", "detail": detail}
+            self._tool_health_report = {
+                "checks": [issue],
+                "issues": [issue],
+                "checked": 0,
+                "passed": 0,
+                "stderr": self._tool_health_error_output,
+                "exit_code": exit_code,
+            }
+            self.tool_health_refresh_button.setEnabled(True)
+            self._render_tool_health_report()
+            self._publish_tool_health_issues([issue], checked=0)
             return
         issues = result.get("issues", [])
+        checks = list(result.get("checks", []))
         if exit_code != 0 and not issues:
-            issues = [{
+            issue = {
                 "tool": "startup",
+                "status": "failed",
                 "detail": self._tool_health_error_output.strip() or f"Le processus s'est terminé avec le code {exit_code}.",
-            }]
+            }
+            issues = [issue]
+            checks.append(issue)
+        self._tool_health_report = {
+            **result,
+            "checks": checks,
+            "issues": issues,
+            "stderr": self._tool_health_error_output,
+            "exit_code": exit_code,
+        }
+        self.tool_health_refresh_button.setEnabled(True)
+        self._render_tool_health_report()
         if issues:
             self._publish_tool_health_issues(issues, checked=result.get("checked", 0))
+
+    def _render_tool_health_report(self):
+        report = self._tool_health_report
+        checks = list(report.get("checks") or [])
+        if not checks:
+            checks = list(report.get("issues") or [])
+        self._tool_health_rows = checks
+        self.tool_health_table.setRowCount(0)
+        self.tool_health_table.blockSignals(True)
+        for check in checks:
+            row = self.tool_health_table.rowCount()
+            self.tool_health_table.insertRow(row)
+            status = str(check.get("status", "failed" if check in report.get("issues", []) else "unknown"))
+            status_label = {"ok": "Réussi", "blocked": "Bloqué", "failed": "Échec"}.get(status, status)
+            raw_detail = str(check.get("detail", "Aucun détail fourni."))
+            if status == "ok":
+                explanation = raw_detail
+            else:
+                problem = tool_health_diagnostics.explain_tool_problem(
+                    raw_detail,
+                    check.get("traceback", ""),
+                    report.get("stderr", ""),
+                    status,
+                )
+                explanation = f"{problem['title']} · {problem['message']}"
+            values = (
+                str(check.get("tool", "outil")),
+                status_label,
+                explanation,
+            )
+            if status == "failed":
+                row_background = QColor("#5a2528")
+                row_foreground = QColor("#ffe2e3")
+            elif status == "blocked":
+                row_background = QColor("#55441f")
+                row_foreground = QColor("#ffedc2")
+            else:
+                row_background = None
+                row_foreground = None
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if row_background is not None and row_foreground is not None:
+                    item.setBackground(row_background)
+                    item.setForeground(row_foreground)
+                if column == 2:
+                    item.setToolTip(raw_detail)
+                self.tool_health_table.setItem(row, column, item)
+        self.tool_health_table.blockSignals(False)
+
+        checked = int(report.get("checked", len(checks)) or 0)
+        passed = int(report.get("passed", 0) or 0)
+        issues = report.get("issues", [])
+        if not checked and not checks:
+            self.tool_health_summary.setText("Aucun diagnostic exécuté.")
+        else:
+            summary = f"{passed} outil(s) validé(s) sur {checked} contrôlé(s) · {len(issues)} problème(s)"
+            if report.get("exit_code") is not None:
+                summary += f" · code de sortie {report['exit_code']}"
+            self.tool_health_summary.setText(summary)
+        if checks:
+            self.tool_health_table.selectRow(0)
+            self._show_selected_tool_health_log()
+        else:
+            self.tool_health_log.clear()
+
+    def _show_selected_tool_health_log(self, *_args):
+        row = self.tool_health_table.currentRow()
+        if not 0 <= row < len(self._tool_health_rows):
+            self.tool_health_log.clear()
+            return
+        check = self._tool_health_rows[row]
+        status = str(check.get("status", "failed" if check in self._tool_health_report.get("issues", []) else "unknown"))
+        details = [f"Outil : {check.get('tool', 'outil')}", f"État : {status}", ""]
+        if status != "ok":
+            problem = tool_health_diagnostics.explain_tool_problem(
+                check.get("detail", ""),
+                check.get("traceback", ""),
+                self._tool_health_report.get("stderr", ""),
+                status,
+            )
+            details.extend((
+                f"{problem['title']}\n{problem['message']}",
+                f"À essayer : {problem['action']}",
+                "",
+                "Log brut :",
+                str(check.get("detail", "Aucun détail fourni.")),
+            ))
+        else:
+            details.extend(("Résultat :", str(check.get("detail", "Aucun détail fourni."))))
+        if check.get("traceback"):
+            details.extend(("", "Trace complète :", str(check["traceback"])))
+        if self._tool_health_report.get("stderr"):
+            details.extend(("", "Sortie d’erreur du processus :", str(self._tool_health_report["stderr"])))
+        self.tool_health_log.setPlainText("\n".join(details))
 
     def _publish_tool_health_issues(self, issues, checked):
         details = [
@@ -2820,6 +3258,8 @@ class KairoWorkspace(QMainWindow):
         self.code_button.blockSignals(False)
         self.conversation_section.setVisible(not self.code_mode_active)
         self.files_section.setVisible(self.code_mode_active)
+        if self.code_mode_active and self.conversation_toggle.isChecked():
+            self.conversation_toggle.setChecked(False)
         if self.code_mode_active:
             self.workspace_splitter.insertWidget(0, self.editor_panel)
             self.editor_panel.show()
@@ -2838,16 +3278,34 @@ class KairoWorkspace(QMainWindow):
             if self.tool_page_stack.currentIndex() == 0:
                 self.page_subtitle.setText("Votre espace de discussion avec KAIRO")
 
-    def _apply_style(self):
+    def _apply_style(self, theme_override=None):
+        saved_themes = self.ui_settings.value("appearance/themeLibrary", "[]")
+        profiles = theme_library.load_library(str(saved_themes))
+        selected_id = str(self.ui_settings.value("appearance/themeProfile", ""))
+        selected_theme = theme_override or theme_library.find_theme(profiles, selected_id)
+        if selected_theme is None:
+            base = self.ui_settings.value("appearance/theme", "dark")
+            selected_theme = theme_library.find_theme(
+                profiles, "paper" if base == "light" else "forest"
+            )
         style = """
             QWidget { color: #e7eee9; font-family: 'Noto Sans'; font-size: 10pt; }
             QWidget#root, QWidget#mainPanel, QWidget#authPage { background: #111714; }
             QWidget#sidebar { background: #171f1b; border-right: 1px solid #29352e; }
             QWidget#sidebar QWidget { background: transparent; }
+            QWidget#conversationDrawer { background: #171f1b; border: 1px solid #39473e; border-radius: 0 10px 10px 0; }
+            QWidget#accountOverview { background: #1a231e; border: 1px solid #344138; border-radius: 10px; }
+            QLabel#accountMonogram { color: #173722; background: #b9e9c6; border-radius: 22px; font-size: 16px; font-weight: 800; }
+            QLabel#accountName { color: #f2f5f2; font-size: 12pt; font-weight: 700; }
+            QLabel#accountMeta { color: #98a89f; }
             QLabel#brand { color: #c2f0d1; font-size: 23px; font-weight: 800; }
             QLabel#tagline { color: #91a59a; font-size: 9pt; font-weight: 700; }
             QLabel#sectionLabel { color: #87988e; font-size: 8pt; font-weight: 800; margin-top: 7px; }
+            QToolButton#conversationToggle { color: #87988e; background: transparent; border: 0; padding: 5px 0; font-size: 8pt; font-weight: 800; text-align: left; }
+            QToolButton#conversationToggle:hover { color: #c2f0d1; }
+            QLabel#drawerTitle { color: #f2f5f2; font-size: 14pt; font-weight: 700; }
             QLabel#pageTitle { color: #f2f5f2; font-size: 21pt; font-weight: 700; }
+            QLabel#welcomeGreeting { color: #f2f5f2; font-size: 24pt; font-weight: 700; }
             QLabel#subtitle, QLabel#mutedText, QLabel#notice, QLabel#editorStatus { color: #98a89f; }
             QLabel#status { color: #c7efd3; background: #20372a; border: 1px solid #395b43; border-radius: 13px; padding: 7px 12px; font-size: 9pt; }
             QComboBox, QLineEdit, QPlainTextEdit, QTextBrowser, QTableWidget {
@@ -2858,6 +3316,13 @@ class KairoWorkspace(QMainWindow):
             QComboBox:focus, QLineEdit:focus, QPlainTextEdit:focus { border: 1px solid #9bd6ad; }
             QComboBox QAbstractItemView { background: #202a24; color: #e7eee9; border: 1px solid #3a4a3e; selection-background-color: #355940; padding: 5px; }
             QListWidget#chatList, QTreeView#fileTree { background: #141c17; color: #d0d9d3; border: 1px solid #29362d; border-radius: 10px; padding: 5px; }
+            QDialog#conversationManagerDialog { background: #111714; color: #e7eee9; }
+            QTableWidget#conversationManagerTable { background: #151d18; alternate-background-color: #1a241d; color: #e1e9e3; border: 1px solid #344138; border-radius: 9px; gridline-color: transparent; selection-background-color: #355940; selection-color: #f5fff7; }
+            QTableWidget#conversationManagerTable::item { padding: 10px 12px; border-bottom: 1px solid #29362d; }
+            QHeaderView#conversationManagerHeader::section { color: #a9d9b6; background: #202a24; border: 0; border-bottom: 1px solid #3a493e; padding: 11px 12px; font-weight: 700; }
+            QLabel#conversationSelectionSummary { color: #a9d9b6; font-weight: 700; }
+            QPushButton#conversationDeleteButton { color: #ffe2e3; background: #512b2e; border-color: #754247; }
+            QPushButton#conversationDeleteButton:hover { background: #693438; border-color: #a75a61; }
             QListWidget#toolList { background: transparent; color: #d0d9d3; border: 0; border-radius: 8px; padding: 2px; }
             QListWidget#chatList::item { padding: 10px; border-radius: 7px; }
             QListWidget#chatList::item:hover { background: #202c23; }
@@ -2877,7 +3342,16 @@ class KairoWorkspace(QMainWindow):
             QWidget#authPanel { background: #19221d; border: 1px solid #344239; border-radius: 16px; }
             QLabel#authError { color: #ff9d8e; }
             QLabel#avatarPreview { color: #e5f3e9; background: #294333; border: 1px solid #55745d; border-radius: 36px; font-size: 24px; }
-            QLabel#profileAvatar { color: #e5f3e9; background: #294333; border: 1px solid #55745d; border-radius: 19px; font-weight: 700; }
+            QToolButton#profileAvatar { color: #e5f3e9; background: #294333; border: 1px solid #55745d; border-radius: 19px; font-weight: 700; font-size: 16px; padding: 0; }
+            QToolButton#profileAvatar:hover { background: #355f43; border-color: #8bb594; }
+            QPushButton#welcomePrimaryButton, QPushButton#welcomeSecondaryButton { text-align: center; padding: 10px 14px; }
+            QPushButton#welcomePrimaryButton { color: #102016; background: #b9e9c6; border-color: #c9f4d4; }
+            QPushButton#welcomePrimaryButton:hover { background: #d0f4d9; }
+            QPushButton#drawerNewChatButton, QPushButton#accountPrimaryButton { color: #102016; background: #b9e9c6; border-color: #c9f4d4; text-align: center; }
+            QPushButton#drawerNewChatButton:hover, QPushButton#accountPrimaryButton:hover { background: #d0f4d9; }
+            QMenu { color: #e7eee9; background: #202a24; border: 1px solid #3a4a3e; padding: 5px; }
+            QMenu::item { padding: 8px 24px 8px 12px; border-radius: 5px; }
+            QMenu::item:selected { color: #f5fff7; background: #355940; }
             QPlainTextEdit#codeEditor { background: #111714; border: 0; border-radius: 8px; padding: 14px; }
             QLineEdit#composer { background: #202a24; border: 1px solid #46574b; border-radius: 12px; padding: 13px 15px; font-size: 11pt; }
             QPushButton {
@@ -2894,7 +3368,9 @@ class KairoWorkspace(QMainWindow):
             QPushButton#habitNotificationBanner { color: #e6f5e9; background: #294b35; border: 1px solid #5c946b; border-left: 4px solid #9fe0b0; border-radius: 8px; padding: 0; text-align: left; }
             QPushButton#habitNotificationBanner:hover { background: #355f43; }
             QLabel#habitNotificationTitle { color: #e6f5e9; font-weight: 700; }
-            QLabel#habitNotificationMessage { color: #d5ead9; }
+            QTextBrowser#habitNotificationMessage { color: #d5ead9; background: transparent; border: 0; padding: 0; }
+            QToolButton#notificationClose { color: #d5ead9; background: transparent; border: 0; padding: 0 4px; font-size: 16px; }
+            QToolButton#notificationClose:hover { color: #ffffff; background: #477957; border-radius: 4px; }
             QPushButton#sendButton { min-width: 110px; padding: 12px 16px; }
             QPushButton#sendButton:hover, QPushButton#saveButton:hover, QPushButton#authPrimaryButton:hover { background: #d0f4d9; }
             QPushButton:disabled { color: #748078; background: #1b231e; border-color: #2c3730; }
@@ -2927,16 +3403,29 @@ class KairoWorkspace(QMainWindow):
             QScrollBar::handle:vertical:hover { background: #687f6d; }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
         """
-        if self.ui_settings.value("appearance/theme", "dark") == "light":
+        if selected_theme.get("base", "dark") == "light":
             style += """
                 QWidget { color: #25352c; }
                 QWidget#root, QWidget#mainPanel, QWidget#authPage { background: #f1f4ef; }
                 QWidget#sidebar { background: #e8eee8; border-right-color: #d4ddd4; }
+                QDialog#conversationManagerDialog { background: #f1f4ef; color: #25352c; }
+                QTableWidget#conversationManagerTable { background: #ffffff; alternate-background-color: #f1f6f0; color: #26372c; border-color: #cbd8cd; selection-background-color: #c8e3cd; selection-color: #173722; }
+                QTableWidget#conversationManagerTable::item { border-bottom-color: #e1e9e1; }
+                QHeaderView#conversationManagerHeader::section { color: #28573a; background: #e5eee6; border-bottom-color: #cbd8cd; }
+                QLabel#conversationSelectionSummary { color: #347145; }
+                QPushButton#conversationDeleteButton { color: #782f33; background: #f7e4e4; border-color: #e4b9bb; }
+                QPushButton#conversationDeleteButton:hover { color: #64262a; background: #efd0d1; border-color: #d49498; }
+                QWidget#conversationDrawer { background: #e8eee8; border-color: #cbd8cc; }
+                QWidget#accountOverview { background: #fbfcf9; border-color: #d2ddd3; }
+                QLabel#accountMonogram { color: #ffffff; background: #3e7850; }
+                QLabel#accountName { color: #1e3326; }
+                QLabel#accountMeta { color: #65766a; }
                 QLabel#brand { color: #28573a; }
+                QLabel#drawerTitle { color: #1e3326; }
                 QLabel#tagline, QLabel#sectionLabel, QLabel#subtitle, QLabel#mutedText,
                 QLabel#notice, QLabel#editorStatus, QLabel#settingsSubtitle, QLabel#settingsHint,
                 QLabel#powerScale { color: #65766a; }
-                QLabel#pageTitle, QLabel#settingsTitle { color: #1e3326; }
+                QLabel#pageTitle, QLabel#settingsTitle, QLabel#welcomeGreeting { color: #1e3326; }
                 QLabel#status { color: #28573a; background: #dcefe0; border-color: #b6d8bd; }
                 QComboBox, QLineEdit, QPlainTextEdit, QTextBrowser, QTableWidget { background: #fbfcf9; color: #26372c; border-color: #d2ddd3; }
                 QComboBox QAbstractItemView { background: #fbfcf9; color: #26372c; border-color: #d2ddd3; selection-background-color: #deefe2; }
@@ -2950,7 +3439,8 @@ class KairoWorkspace(QMainWindow):
                 QPlainTextEdit#codeEditor { background: #fbfcf9; color: #26372c; border-color: #d7e0d7; }
                 QWidget#editorPanel, QWidget#authPanel, QTabWidget::pane { background: #fbfcf9; border-color: #d7e0d7; }
                 QLabel#editorFileLabel { color: #2e4936; }
-                QLabel#avatarPreview, QLabel#profileAvatar { color: #28523a; background: #dcefe0; border-color: #b3d5ba; }
+                QLabel#avatarPreview { color: #28523a; background: #dcefe0; border-color: #b3d5ba; }
+                QToolButton#profileAvatar { color: #28523a; background: #dcefe0; border-color: #b3d5ba; }
                 QLineEdit#composer { background: #ffffff; color: #23372b; border-color: #cbd8cd; }
                 QPushButton { color: #294334; background: #e7eee7; border-color: #cbd8cd; }
                 QPushButton:hover { color: #1e492d; background: #dceade; border-color: #8bb594; }
@@ -2958,7 +3448,8 @@ class KairoWorkspace(QMainWindow):
                 QPushButton#habitNotificationBanner { color: #20432c; background: #dcefe0; border-color: #b3d5ba; border-left-color: #4e8b5d; }
                 QPushButton#habitNotificationBanner:hover { background: #cce8d2; }
                 QLabel#habitNotificationTitle { color: #20432c; }
-                QLabel#habitNotificationMessage { color: #365d40; }
+                QTextBrowser#habitNotificationMessage { color: #365d40; }
+                QToolButton#notificationClose { color: #365d40; }
                 QPushButton#connectButton { background: #dcefe0; border-color: #b3d5ba; }
                 QLineEdit#calculatorDisplay { background: #fbfcf9; color: #26372c; }
                 QPushButton#calculatorDigitKey { background: #f4f7f3; border-color: #d2ddd3; }
@@ -2983,6 +3474,15 @@ class KairoWorkspace(QMainWindow):
                 QScrollBar::handle:vertical { background: #c2d0c4; }
                 QScrollBar::handle:vertical:hover { background: #93ae98; }
             """
+        wallpaper_url = ""
+        wallpaper_path = str(selected_theme.get("wallpaper", "")).strip()
+        if wallpaper_path:
+            local_wallpaper = Path(wallpaper_path).expanduser()
+            if local_wallpaper.is_file():
+                wallpaper_url = QUrl.fromLocalFile(str(local_wallpaper.resolve())).toString(
+                    QUrl.ComponentFormattingOption.FullyEncoded
+                )
+        style += theme_library.stylesheet_overrides(selected_theme, wallpaper_url)
         self.setStyleSheet(style)
 
     def _open_notification_settings(self):
@@ -3192,15 +3692,215 @@ class KairoWorkspace(QMainWindow):
 
         appearance = QWidget()
         appearance.setObjectName("settingsPage")
-        appearance_form = QFormLayout(appearance)
-        appearance_form.setContentsMargins(20, 20, 20, 20)
-        appearance_form.setVerticalSpacing(16)
-        theme_picker = QComboBox()
-        theme_picker.addItem("Sombre", "dark")
-        theme_picker.addItem("Clair", "light")
-        current_theme = self.ui_settings.value("appearance/theme", "dark")
-        theme_picker.setCurrentIndex(max(0, theme_picker.findData(current_theme)))
-        appearance_form.addRow("Thème", theme_picker)
+        appearance_layout = QVBoxLayout(appearance)
+        appearance_layout.setContentsMargins(20, 20, 20, 20)
+        appearance_layout.setSpacing(12)
+        profile_row = QHBoxLayout()
+        profile_picker = QComboBox()
+        profile_picker.setMinimumWidth(180)
+        profile_library = theme_library.load_library(
+            str(self.ui_settings.value("appearance/themeLibrary", "[]"))
+        )
+        for profile in profile_library:
+            profile_picker.addItem(profile["name"], profile["id"])
+        selected_profile_id = str(self.ui_settings.value("appearance/themeProfile", ""))
+        if not theme_library.find_theme(profile_library, selected_profile_id):
+            selected_base = self.ui_settings.value("appearance/theme", "dark")
+            selected_profile_id = "paper" if selected_base == "light" else "forest"
+        profile_picker.setCurrentIndex(max(0, profile_picker.findData(selected_profile_id)))
+        new_profile_button = QPushButton("Créer un thème")
+        delete_profile_button = QPushButton("Supprimer")
+        profile_row.addWidget(QLabel("Bibliothèque"))
+        profile_row.addWidget(profile_picker, stretch=1)
+        profile_row.addWidget(new_profile_button)
+        profile_row.addWidget(delete_profile_button)
+        appearance_layout.addLayout(profile_row)
+
+        appearance_form = QFormLayout()
+        appearance_form.setVerticalSpacing(10)
+        profile_name = QLineEdit()
+        base_picker = QComboBox()
+        base_picker.addItem("Sombre", "dark")
+        base_picker.addItem("Clair", "light")
+        appearance_form.addRow("Nom", profile_name)
+        appearance_form.addRow("Contraste", base_picker)
+        appearance_layout.addLayout(appearance_form)
+
+        colors_layout = QGridLayout()
+        colors_layout.setHorizontalSpacing(12)
+        colors_layout.setVerticalSpacing(8)
+        color_labels = (
+            ("window", "Fond"),
+            ("surface", "Panneaux"),
+            ("text", "Texte"),
+            ("accent", "Accent"),
+            ("button_background", "Boutons"),
+            ("button_text", "Texte des boutons"),
+            ("primary_text", "Texte des actions"),
+        )
+        color_buttons = {}
+        for index, (field, label) in enumerate(color_labels):
+            row = index // 3
+            column = (index % 3) * 2
+            colors_layout.addWidget(QLabel(label), row, column)
+            swatch = QPushButton()
+            swatch.setMinimumWidth(92)
+            swatch.setToolTip(f"Choisir la couleur : {label.lower()}")
+            colors_layout.addWidget(swatch, row, column + 1)
+            color_buttons[field] = swatch
+        appearance_layout.addLayout(colors_layout)
+
+        button_style = QComboBox()
+        button_style.addItem("Arrondis", "rounded")
+        button_style.addItem("Carrés", "square")
+        button_style.addItem("Pilule", "pill")
+        appearance_form.addRow("Forme des boutons", button_style)
+
+        wallpaper_row = QHBoxLayout()
+        wallpaper_input = QLineEdit()
+        wallpaper_input.setPlaceholderText("Aucun fond d’écran")
+        wallpaper_button = QPushButton("Choisir une image")
+        clear_wallpaper_button = QPushButton("Retirer")
+        wallpaper_row.addWidget(wallpaper_input, stretch=1)
+        wallpaper_row.addWidget(wallpaper_button)
+        wallpaper_row.addWidget(clear_wallpaper_button)
+        appearance_layout.addWidget(QLabel("Image de fond"))
+        appearance_layout.addLayout(wallpaper_row)
+
+        preview = QWidget()
+        preview.setObjectName("themePreview")
+        preview_layout = QHBoxLayout(preview)
+        preview_layout.setContentsMargins(12, 10, 12, 10)
+        preview_label = QLabel("Aperçu du thème")
+        preview_layout.addWidget(preview_label, stretch=1)
+        preview_primary = QPushButton("Action principale")
+        preview_primary.setObjectName("themePreviewPrimary")
+        preview_layout.addWidget(preview_primary)
+        preview_secondary = QPushButton("Action secondaire")
+        preview_layout.addWidget(preview_secondary)
+        appearance_layout.addWidget(preview)
+        appearance_hint = QLabel("Les changements sont prévisualisés immédiatement et conservés après Enregistrer.")
+        appearance_hint.setObjectName("settingsHint")
+        appearance_hint.setWordWrap(True)
+        appearance_layout.addWidget(appearance_hint)
+        appearance_layout.addStretch(1)
+
+        editing_profile = {"value": None}
+
+        def current_profile_values():
+            profile = dict(editing_profile["value"] or profile_library[0])
+            profile["name"] = profile_name.text().strip() or "Mon thème"
+            profile["base"] = base_picker.currentData()
+            profile["button_style"] = button_style.currentData()
+            profile["wallpaper"] = wallpaper_input.text().strip()
+            for field, swatch in color_buttons.items():
+                profile[field] = swatch.property("themeColor")
+            return profile
+
+        def apply_profile_preview():
+            profile = current_profile_values()
+            editing_profile["value"] = profile
+            wallpaper_path = Path(profile["wallpaper"]).expanduser() if profile["wallpaper"] else None
+            wallpaper_url = (
+                QUrl.fromLocalFile(str(wallpaper_path.resolve())).toString(
+                    QUrl.ComponentFormattingOption.FullyEncoded
+                )
+                if wallpaper_path and wallpaper_path.is_file()
+                else ""
+            )
+            preview.setStyleSheet(
+                f"background-color: {profile['surface']}; border: 1px solid {profile['accent']};"
+                f"border-radius: {theme_library.BUTTON_STYLES[profile['button_style']]}px;"
+            )
+            self._apply_style(profile)
+
+        def load_profile(index):
+            profile = theme_library.find_theme(profile_library, profile_picker.itemData(index))
+            if profile is None:
+                return
+            editing_profile["value"] = dict(profile)
+            profile_name.blockSignals(True)
+            base_picker.blockSignals(True)
+            button_style.blockSignals(True)
+            wallpaper_input.blockSignals(True)
+            profile_name.setText(profile["name"])
+            profile_name.setEnabled(profile["id"].startswith("custom-"))
+            base_picker.setCurrentIndex(max(0, base_picker.findData(profile["base"])))
+            button_style.setCurrentIndex(max(0, button_style.findData(profile["button_style"])))
+            wallpaper_input.setText(profile["wallpaper"])
+            profile_name.blockSignals(False)
+            base_picker.blockSignals(False)
+            button_style.blockSignals(False)
+            wallpaper_input.blockSignals(False)
+            for field, swatch in color_buttons.items():
+                color = profile[field]
+                swatch.setProperty("themeColor", color)
+                swatch.setText(color)
+                swatch.setStyleSheet(f"background-color: {color}; color: {profile['text']};")
+            delete_profile_button.setEnabled(profile["id"].startswith("custom-"))
+            apply_profile_preview()
+
+        def choose_theme_color(field):
+            profile = current_profile_values()
+            selected = QColorDialog.getColor(QColor(profile[field]), self, "Choisir une couleur")
+            if not selected.isValid():
+                return
+            color = selected.name().upper()
+            swatch = color_buttons[field]
+            swatch.setProperty("themeColor", color)
+            swatch.setText(color)
+            swatch.setStyleSheet(f"background-color: {color}; color: {profile['text']};")
+            apply_profile_preview()
+
+        def choose_wallpaper():
+            path, _selected_filter = QFileDialog.getOpenFileName(
+                self,
+                "Choisir une image de fond",
+                wallpaper_input.text() or str(Path.home()),
+                "Images (*.png *.jpg *.jpeg *.webp *.bmp)",
+            )
+            if path:
+                wallpaper_input.setText(path)
+                apply_profile_preview()
+
+        def create_profile():
+            name, accepted = QInputDialog.getText(self, "Nouveau thème", "Nom du thème")
+            if not accepted or not name.strip():
+                return
+            source = current_profile_values()
+            profile = theme_library.create_custom_theme(name, source, uuid.uuid4().hex[:10])
+            profile_library.append(profile)
+            profile_picker.addItem(profile["name"], profile["id"])
+            profile_picker.setCurrentIndex(profile_picker.count() - 1)
+
+        def delete_profile():
+            profile = editing_profile["value"] or {}
+            if not profile.get("id", "").startswith("custom-"):
+                return
+            answer = QMessageBox.question(
+                self,
+                "Supprimer le thème",
+                f"Supprimer « {profile['name']} » de la bibliothèque ?",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            profile_library[:] = [item for item in profile_library if item["id"] != profile["id"]]
+            profile_picker.removeItem(profile_picker.currentIndex())
+            if profile_picker.count():
+                profile_picker.setCurrentIndex(0)
+
+        for field, swatch in color_buttons.items():
+            swatch.clicked.connect(lambda _checked=False, key=field: choose_theme_color(key))
+        profile_picker.currentIndexChanged.connect(load_profile)
+        base_picker.currentIndexChanged.connect(lambda _index: apply_profile_preview())
+        button_style.currentIndexChanged.connect(lambda _index: apply_profile_preview())
+        wallpaper_input.textChanged.connect(lambda _text: apply_profile_preview())
+        profile_name.textChanged.connect(lambda _text: apply_profile_preview())
+        wallpaper_button.clicked.connect(choose_wallpaper)
+        clear_wallpaper_button.clicked.connect(lambda: wallpaper_input.clear())
+        new_profile_button.clicked.connect(create_profile)
+        delete_profile_button.clicked.connect(delete_profile)
+        load_profile(profile_picker.currentIndex())
         tabs.addTab(appearance, "Apparence")
 
         applications_page = QWidget()
@@ -3320,14 +4020,59 @@ class KairoWorkspace(QMainWindow):
         account_layout.setSpacing(14)
         account_name = os.environ.get("LOCAL_IA_ACCOUNT", "")
         account_keys = openrouter_api_keys()
-        account_info = QLabel(
-            f"{account_name or 'Aucun compte connecté'}  ·  "
-            f"{'Ollama' if self._selected_provider(self.config) == 'ollama' else 'OpenRouter' if account_keys else 'Aucun fournisseur'}  ·  "
-            f"{len(account_keys)} clé{'s' if len(account_keys) != 1 else ''} active{'s' if len(account_keys) != 1 else ''}"
+        account_overview = QWidget()
+        account_overview.setObjectName("accountOverview")
+        overview_layout = QHBoxLayout(account_overview)
+        overview_layout.setContentsMargins(16, 14, 16, 14)
+        overview_layout.setSpacing(12)
+        account_monogram = QLabel(account_name[:1].upper() if account_name else "K")
+        account_monogram.setObjectName("accountMonogram")
+        account_monogram.setFixedSize(44, 44)
+        account_monogram.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        overview_layout.addWidget(account_monogram)
+        account_details = QVBoxLayout()
+        account_details.setSpacing(3)
+        account_title = QLabel(account_name or "Aucun compte connecté")
+        account_title.setObjectName("accountName")
+        account_details.addWidget(account_title)
+        provider_label = (
+            "Ollama"
+            if self._selected_provider(self.config) == "ollama"
+            else "OpenRouter" if account_keys else "Aucun fournisseur actif"
         )
-        account_info.setObjectName("settingsSummary")
-        account_info.setWordWrap(True)
-        account_layout.addWidget(account_info)
+        account_meta = QLabel(
+            f"{provider_label} · {len(account_keys)} clé(s) API active(s)"
+        )
+        account_meta.setObjectName("accountMeta")
+        account_details.addWidget(account_meta)
+        overview_layout.addLayout(account_details, stretch=1)
+        account_layout.addWidget(account_overview)
+
+        account_actions = QHBoxLayout()
+        account_actions.setSpacing(8)
+        connect_button = QPushButton("Connexion / création")
+        connect_button.setObjectName("accountPrimaryButton")
+
+        def open_connection_page():
+            self.page_stack.setCurrentIndex(0)
+            self._connect_account()
+
+        connect_button.clicked.connect(open_connection_page)
+        manage_button = QPushButton("Gérer les clés API")
+        manage_button.setEnabled(bool(account_name))
+        manage_button.clicked.connect(self._manage_api_keys)
+        disconnect_button = QPushButton("Déconnexion")
+        disconnect_button.setEnabled(bool(account_name or account_keys))
+
+        def disconnect_account():
+            self.page_stack.setCurrentIndex(0)
+            self._disconnect_account()
+
+        disconnect_button.clicked.connect(disconnect_account)
+        account_actions.addWidget(connect_button)
+        account_actions.addWidget(manage_button)
+        account_actions.addWidget(disconnect_button)
+        account_layout.addLayout(account_actions)
 
         current_power = openrouter_power()
         power_card = QWidget()
@@ -3350,8 +4095,7 @@ class KairoWorkspace(QMainWindow):
         power_heading.addWidget(power_label)
         power_layout.addLayout(power_heading)
         power_hint = QLabel(
-            "Le curseur choisit le nombre de clés utilisées par demande. Chaque appel garde son budget de contexte; "
-            "KAIRO affiche une estimation des tokens avant chaque génération."
+            "Choisis combien de clés OpenRouter peuvent être utilisées pour chaque demande."
         )
         power_hint.setObjectName("settingsHint")
         power_hint.setWordWrap(True)
@@ -3379,28 +4123,6 @@ class KairoWorkspace(QMainWindow):
 
         power_slider.valueChanged.connect(sync_power_label)
         sync_power_label(current_power)
-
-        account_actions = QHBoxLayout()
-        connect_button = QPushButton("Connexion / création")
-
-        def open_connection_page():
-            self.page_stack.setCurrentIndex(0)
-            self._connect_account()
-
-        connect_button.clicked.connect(open_connection_page)
-        manage_button = QPushButton("Gérer les clés API")
-        manage_button.clicked.connect(self._manage_api_keys)
-        disconnect_button = QPushButton("Déconnexion")
-
-        def disconnect_account():
-            self.page_stack.setCurrentIndex(0)
-            self._disconnect_account()
-
-        disconnect_button.clicked.connect(disconnect_account)
-        account_actions.addWidget(connect_button)
-        account_actions.addWidget(manage_button)
-        account_actions.addWidget(disconnect_button)
-        account_layout.addLayout(account_actions)
         account_layout.addStretch(1)
         tabs.addTab(account_page, "Compte")
 
@@ -3514,7 +4236,11 @@ class KairoWorkspace(QMainWindow):
         update_layout.addStretch(1)
         tabs.addTab(update_page, "Mise à jour")
         if initial_tab:
-            tabs.setCurrentWidget(notifications)
+            requested_tab = str(initial_tab).casefold()
+            for index in range(tabs.count()):
+                if tabs.tabText(index).casefold() == requested_tab:
+                    tabs.setCurrentIndex(index)
+                    break
 
         tools_page = QWidget()
         tools_layout = QVBoxLayout(tools_page)
@@ -3540,8 +4266,24 @@ class KairoWorkspace(QMainWindow):
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
 
+        def cancel_settings():
+            self._apply_style()
+            self.page_stack.setCurrentIndex(0)
+
         def save_settings():
-            self.ui_settings.setValue("appearance/theme", theme_picker.currentData())
+            active_profile = current_profile_values()
+            for index, profile in enumerate(profile_library):
+                if profile["id"] == active_profile["id"]:
+                    profile_library[index] = active_profile
+                    break
+            else:
+                profile_library.append(active_profile)
+            self.ui_settings.setValue("appearance/theme", active_profile["base"])
+            self.ui_settings.setValue("appearance/themeProfile", active_profile["id"])
+            self.ui_settings.setValue(
+                "appearance/themeLibrary",
+                theme_library.serialize_library(profile_library),
+            )
             self.ui_settings.setValue("notifications/sound", sound_enabled.isChecked())
             desktop_tray.set_autostart_enabled(auto_start.isChecked(), self.ui_settings)
             if not desktop_tray.service_running():
@@ -3574,7 +4316,7 @@ class KairoWorkspace(QMainWindow):
             self.notice.setText(f"Fournisseur actif : {config['provider']} · configuration enregistrée.")
 
         buttons.accepted.connect(save_settings)
-        buttons.rejected.connect(lambda: self.page_stack.setCurrentIndex(0))
+        buttons.rejected.connect(cancel_settings)
         layout.addWidget(buttons)
         self._settings_page = page
         page_index = self.page_stack.addWidget(page)
@@ -4073,21 +4815,17 @@ class KairoWorkspace(QMainWindow):
             self._start_ollama_task("delete", self.ollama_url_input.text(), model)
 
     def _set_connection_status(self):
-        account = os.environ.get("LOCAL_IA_ACCOUNT", "")
+        self._refresh_welcome()
         self._refresh_model_indicator()
         if self._selected_provider(self.config) == "ollama":
-            self.status.setText("●  Ollama sélectionné")
-            self.connect_button.setText("OpenRouter")
             self.prompt.setEnabled(True)
             self.send_button.setEnabled(True)
             if hasattr(self, "page_stack"):
                 self.page_stack.setCurrentIndex(0)
                 self.auth_back_button.hide()
-                self.profile_avatar.hide()
+                self._refresh_profile_avatar()
             return
         if openrouter_api_keys():
-            self.status.setText("●  Connecté")
-            self.connect_button.setText(f"●  {account or 'OpenRouter'}")
             self.prompt.setEnabled(True)
             self.send_button.setEnabled(True)
             if hasattr(self, "page_stack"):
@@ -4095,14 +4833,20 @@ class KairoWorkspace(QMainWindow):
                 self.auth_back_button.show()
                 self._refresh_profile_avatar()
         else:
-            self.status.setText("●  Déconnecté")
-            self.connect_button.setText("Se connecter")
             self.prompt.setEnabled(False)
             self.send_button.setEnabled(False)
             if hasattr(self, "page_stack"):
                 self.page_stack.setCurrentIndex(1)
                 self.auth_back_button.hide()
-                self.profile_avatar.hide()
+                self._refresh_profile_avatar()
+
+    def _refresh_welcome(self):
+        account = os.environ.get("LOCAL_IA_ACCOUNT", "").strip()
+        try:
+            name = accounts.account_profile(account)["username"] if account else "vous"
+        except (OSError, ValueError):
+            name = account or "vous"
+        self.welcome_label.setText(f"Ravi de vous revoir, {name}")
 
     def _refresh_model_indicator(self, provider=None, model=None):
         indicator = getattr(self, "model_indicator", None)
@@ -4120,18 +4864,27 @@ class KairoWorkspace(QMainWindow):
         indicator.setToolTip(f"Modèle actuellement utilisé : {provider_label} · {model}")
 
     def _refresh_profile_avatar(self):
+        account = os.environ.get("LOCAL_IA_ACCOUNT", "").strip()
         try:
-            profile = accounts.account_profile(os.environ.get("LOCAL_IA_ACCOUNT", ""))
+            profile = accounts.account_profile(account)
         except (OSError, ValueError):
-            self.profile_avatar.setText(os.environ.get("LOCAL_IA_ACCOUNT", "K")[:1].upper())
+            self.profile_avatar.setIcon(QIcon())
+            self.profile_avatar.setText(account[:1].upper() or "♙")
             self.profile_avatar.show()
             return
         pixmap = QPixmap(profile["avatar"])
         if not pixmap.isNull():
-            self.profile_avatar.setPixmap(
-                pixmap.scaled(38, 38, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+            self.profile_avatar.setIcon(
+                QIcon(pixmap.scaled(
+                    38,
+                    38,
+                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                    Qt.TransformationMode.SmoothTransformation,
+                ))
             )
+            self.profile_avatar.setText("")
         else:
+            self.profile_avatar.setIcon(QIcon())
             self.profile_avatar.setText(profile["username"][:1].upper())
         self.profile_avatar.show()
 
@@ -4370,6 +5123,7 @@ class KairoWorkspace(QMainWindow):
         self.project_root = None
         self.agent.prepare_chat(self.chat)
         self._load_chat_into_view()
+        self.chat_content_stack.setCurrentWidget(self.chat_content_stack.widget(1))
         self._refresh_chat_list()
         self._set_project_root(None)
         self.notice.setText("Nouvelle conversation créée et partagée avec le CLI.")
@@ -4436,11 +5190,57 @@ class KairoWorkspace(QMainWindow):
         self.compare_transcript.setMarkdown("\n\n".join(messages) or "*Cette conversation ne contient aucun message.*")
 
     def _manage_conversations(self):
+        active_id = self.chat.get("id") if hasattr(self, "chat") else None
+        conversation_store.delete_empty_chats(
+            exclude_ids=(active_id,) if active_id is not None else ()
+        )
         ConversationManagerDialog(self).exec()
         self._refresh_chat_list()
 
+    def _toggle_conversation_menu(self, expanded):
+        drawer = self.conversation_drawer
+        self.conversation_drawer_animation.stop()
+        self.conversation_toggle.setArrowType(
+            Qt.ArrowType.LeftArrow if expanded else Qt.ArrowType.RightArrow
+        )
+        parent_height = self.centralWidget().widget(0).height()
+        drawer_x = self.sidebar.width()
+        closed = QRect(drawer_x, 12, 0, max(120, parent_height - 24))
+        opened = QRect(
+            drawer_x,
+            12,
+            self.conversation_drawer_width,
+            max(120, parent_height - 24),
+        )
+        if expanded:
+            drawer.setGeometry(closed)
+            drawer.show()
+            drawer.raise_()
+            self.conversation_drawer_animation.setStartValue(closed)
+            self.conversation_drawer_animation.setEndValue(opened)
+            self.conversation_drawer_animation.start()
+        elif drawer.isVisible():
+            self.conversation_drawer_animation.setStartValue(drawer.geometry())
+            self.conversation_drawer_animation.setEndValue(closed)
+            self.conversation_drawer_animation.start()
+
+    def _conversation_drawer_animation_finished(self):
+        if not self.conversation_toggle.isChecked():
+            self.conversation_drawer.hide()
+
+    def _new_chat_from_drawer(self):
+        self._new_chat()
+        self.conversation_toggle.setChecked(False)
+
+    def _open_conversation_search(self):
+        self.conversation_toggle.setChecked(True)
+        QTimer.singleShot(260, self.chat_search.setFocus)
+
     def _refresh_chat_list(self):
         current_id = self.chat.get("id") if hasattr(self, "chat") else None
+        conversation_store.delete_empty_chats(
+            exclude_ids=(current_id,) if current_id is not None else ()
+        )
         query = self.chat_search.text().strip().casefold()
         self.chat_list.clear()
         chats = list_chats()
@@ -4464,6 +5264,7 @@ class KairoWorkspace(QMainWindow):
     def _open_chat_item(self, item):
         chat_id = item.data(Qt.ItemDataRole.UserRole)
         self._open_conversation_id(chat_id)
+        self.conversation_toggle.setChecked(False)
 
     def _open_conversation_id(self, chat_id):
         loaded = load_chat(chat_id)
@@ -4471,6 +5272,8 @@ class KairoWorkspace(QMainWindow):
             self.notice.setText("Cette conversation est introuvable.")
             self._refresh_chat_list()
             return
+        if self.tool_navigation.currentIndex() != 0:
+            self.tool_navigation.setCurrentIndex(0)
         self.chat = loaded
         self._refresh_download_buttons()
         self.agent.prepare_chat(self.chat)
@@ -4481,6 +5284,7 @@ class KairoWorkspace(QMainWindow):
             except (OSError, ValueError):
                 self.project_root = None
         self._load_chat_into_view()
+        self.chat_content_stack.setCurrentWidget(self.chat_content_stack.widget(1))
         self._refresh_chat_list()
         self._set_project_root(self.project_root)
 
@@ -4494,6 +5298,9 @@ class KairoWorkspace(QMainWindow):
                 self._append_message(message["role"], message.get("content", ""))
         if not self._transcript_messages:
             self.transcript.setMarkdown("*Pose une question ou choisis une action à gauche.*")
+        self.chat_content_stack.setCurrentWidget(
+            self.chat_content_stack.widget(1) if self._transcript_messages else self.welcome_page
+        )
 
     def _toggle_code_mode(self, checked):
         if not checked:
@@ -4584,7 +5391,7 @@ class KairoWorkspace(QMainWindow):
                 return False
             self._close_editor_file()
         if project is None:
-            self.files_hint.setText("Active Mode Code pour choisir ou créer un projet.")
+            self.files_hint.setText("Choisis un fichier du projet à ouvrir.")
             self.file_tree.setRootIndex(self.file_model.index(""))
             return True
         project = resolved_project
@@ -5415,7 +6222,6 @@ class KairoWorkspace(QMainWindow):
         )
         self.send_button.setEnabled(not busy and connected)
         self.prompt.setEnabled(not busy and connected)
-        self.new_chat_button.setEnabled(not busy)
         self.code_button.setEnabled(True)
         self.chat_list.setEnabled(not busy)
         self.file_tree.setEnabled(not busy)

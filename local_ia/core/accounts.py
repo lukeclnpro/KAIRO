@@ -283,6 +283,41 @@ def authenticate_api_key_records(
         raise ValueError("Compte ou mot de passe invalide.") from error
 
 
+def change_password(
+    username: str,
+    current_password: str,
+    new_password: str,
+    path: Path | None = None,
+) -> None:
+    if len(new_password) < 8:
+        raise ValueError("Le mot de passe doit contenir au moins 8 caracteres.")
+    stored = _load(path)
+    key = _account_key(stored, username.strip())
+    if key is None:
+        raise ValueError("Compte ou mot de passe invalide.")
+    records = authenticate_api_key_records(key, current_password, path)
+    stored[key] = _replace_encrypted_record(
+        stored[key],
+        new_password,
+        [record["key"] for record in records],
+        [record["enabled"] for record in records],
+    )
+    _save(stored, path)
+
+def _replace_encrypted_record(
+    previous: dict,
+    password: str,
+    api_keys: list[str],
+    enabled: list[bool],
+) -> dict:
+    metadata = {
+        field: value
+        for field, value in previous.items()
+        if field not in {"salt", "api_key", "api_keys"}
+    }
+    return {**metadata, **_encrypt_record(password, api_keys, enabled)}
+
+
 def update_api_key(username: str, password: str, api_key: str, path: Path | None = None) -> None:
     new_key = _normalize_api_keys(api_key)[0]
     accounts = _load(path)
@@ -293,7 +328,7 @@ def update_api_key(username: str, password: str, api_key: str, path: Path | None
     api_keys = [record["key"] for record in records]
     enabled = [record["enabled"] for record in records]
     api_keys[0] = new_key
-    accounts[key] = _encrypt_record(password, api_keys, enabled)
+    accounts[key] = _replace_encrypted_record(accounts[key], password, api_keys, enabled)
     _save(accounts, path)
 
 
@@ -310,7 +345,7 @@ def add_api_key(username: str, password: str, api_key: str, path: Path | None = 
         raise ValueError("Cette clé API est déjà enregistrée.")
     api_keys.append(new_key)
     enabled.append(True)
-    accounts[key] = _encrypt_record(password, api_keys, enabled)
+    accounts[key] = _replace_encrypted_record(accounts[key], password, api_keys, enabled)
     _save(accounts, path)
     return len(api_keys)
 
@@ -331,7 +366,7 @@ def remove_api_key(username: str, password: str, index: int, path: Path | None =
     del enabled[index - 1]
     if not any(enabled):
         raise ValueError("Le compte doit conserver au moins une clé API active.")
-    accounts[key] = _encrypt_record(password, api_keys, enabled)
+    accounts[key] = _replace_encrypted_record(accounts[key], password, api_keys, enabled)
     _save(accounts, path)
     return len(api_keys)
 
@@ -353,11 +388,7 @@ def set_api_key_enabled(
     records[index - 1]["enabled"] = bool(enabled)
     if not any(record["enabled"] for record in records):
         raise ValueError("Le compte doit conserver au moins une clé API active.")
-    accounts[key] = _encrypt_record(
-        password,
-        [record["key"] for record in records],
-        [record["enabled"] for record in records],
-    )
+    accounts[key] = _replace_encrypted_record(accounts[key], password, [record["key"] for record in records], [record["enabled"] for record in records])
     _save(accounts, path)
 
 
@@ -369,6 +400,24 @@ def delete_account(username: str, password: str, path: Path | None = None) -> No
     authenticate(key, password, path)
     del accounts[key]
     _save(accounts, path)
+
+
+def rename_account(username: str, new_username: str, path: Path | None = None) -> str:
+    current_name = _validate_username(username)
+    new_name = _validate_username(new_username)
+    stored = _load(path)
+    current_key = _account_key(stored, current_name)
+    if current_key is None:
+        raise ValueError("Compte introuvable.")
+    existing_key = _account_key(stored, new_name)
+    if existing_key is not None and existing_key != current_key:
+        raise ValueError("Ce nom de compte existe déjà.")
+    if current_key == new_name:
+        return new_name
+    record = stored.pop(current_key)
+    stored[new_name] = record
+    _save(stored, path)
+    return new_name
 
 
 def _validate_username(username: str) -> str:

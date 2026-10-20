@@ -438,6 +438,162 @@ def manage_local_accounts():
         pause()
 
 
+def _choose_admin_account():
+    names = accounts.list_accounts()
+    if not names:
+        ui.print_info("Aucun compte local disponible.")
+        return None
+    for index, name in enumerate(names, start=1):
+        print(f"{index}. {name}")
+    choice = ui.prompt("Compte (numéro ou nom) : ").strip()
+    if choice.isdigit() and 1 <= int(choice) <= len(names):
+        return names[int(choice) - 1]
+    return next((name for name in names if name.casefold() == choice.casefold()), None)
+
+
+def change_local_account_password():
+    username = _choose_admin_account()
+    if username is None:
+        ui.print_error("Compte invalide ou aucun compte disponible.")
+        pause()
+        return False
+    current_password = getpass.getpass("Mot de passe actuel : ")
+    new_password = getpass.getpass("Nouveau mot de passe (8 caractères minimum) : ")
+    confirmation = getpass.getpass("Confirmer le nouveau mot de passe : ")
+    if new_password != confirmation:
+        ui.print_error("Les nouveaux mots de passe ne correspondent pas.")
+        pause()
+        return False
+    try:
+        accounts.change_password(username, current_password, new_password)
+        saved_session = accounts.load_saved_session()
+        if saved_session and saved_session[0].casefold() == username.casefold():
+            accounts.save_session(saved_session[0], saved_session[1], password=new_password)
+        elif os.environ.get("LOCAL_IA_ACCOUNT", "").casefold() == username.casefold():
+            set_openrouter_session_keys(accounts.authenticate_api_keys(username, new_password))
+    except (OSError, RuntimeError, ValueError) as error:
+        ui.print_error(str(error))
+        pause()
+        return False
+    ui.print_ok(f"Mot de passe du compte {username} modifié.")
+    pause()
+    return True
+
+
+def _admin_list_accounts():
+    ui.section_title("COMPTES LOCAUX")
+    try:
+        names = accounts.list_accounts()
+    except (OSError, ValueError) as error:
+        ui.print_error(f"Impossible de lire les comptes locaux : {error}")
+        pause()
+        return
+    if not names:
+        ui.print_info(f"Aucun compte local disponible dans {accounts.accounts_path()}.")
+        pause()
+        return
+    for name in names:
+        try:
+            profile = accounts.account_profile(name)
+            email = f" · {profile['email']}" if profile["email"] else ""
+        except (OSError, ValueError):
+            email = ""
+        print(f"• {name}{email}")
+    pause()
+
+
+def rename_local_account():
+    username = _choose_admin_account()
+    if username is None:
+        ui.print_error("Compte invalide ou aucun compte disponible.")
+        pause()
+        return False
+    new_username = ui.prompt(f"Nouveau nom pour {username} : ").strip()
+    if not new_username:
+        ui.print_info("Renommage annulé.")
+        return False
+
+    saved_session = accounts.load_saved_session()
+    saved_password = accounts.load_saved_account_password(username)
+    try:
+        renamed = accounts.rename_account(username, new_username)
+    except (OSError, ValueError) as error:
+        ui.print_error(str(error))
+        pause()
+        return False
+
+    if saved_session and saved_session[0].casefold() == username.casefold():
+        try:
+            accounts.save_session(renamed, saved_session[1], password=saved_password)
+        except (OSError, RuntimeError):
+            ui.print_warn("Le compte est renommé, mais la session mémorisée devra être reconnectée.")
+    if os.environ.get("LOCAL_IA_ACCOUNT", "").casefold() == username.casefold():
+        os.environ["LOCAL_IA_ACCOUNT"] = renamed
+    ui.print_ok(f"Compte renommé : {username} → {renamed}.")
+    pause()
+    return True
+
+
+def admin_menu():
+    """Open the standalone account administration menu."""
+    while True:
+        ui.full_menu(
+            "ADMINISTRATION DES COMPTES",
+            [
+                ("1", "Lister les comptes"),
+                ("2", "Créer un compte"),
+                ("3", "Changer un mot de passe"),
+                ("4", "Gérer les clés API"),
+                ("5", "Supprimer un compte"),
+                ("6", "Renommer un compte"),
+                ("0", "Quitter l’administration"),
+            ],
+            footer="Votre choix : ",
+        )
+        choice = ui.prompt("Votre choix : ").strip()
+        if choice == "0":
+            return 0
+        if choice == "1":
+            _admin_list_accounts()
+        elif choice == "2":
+            create_openrouter_account()
+        elif choice == "3":
+            change_local_account_password()
+        elif choice == "4":
+            manage_openrouter_keys()
+        elif choice == "5":
+            username = _choose_admin_account()
+            if username is None:
+                ui.print_error("Compte invalide ou aucun compte disponible.")
+                pause()
+                continue
+            password = getpass.getpass("Mot de passe du compte : ")
+            confirmation = ui.prompt(
+                f"Pour supprimer {username}, tape SUPPRIMER : "
+            ).strip()
+            if confirmation != "SUPPRIMER":
+                ui.print_info("Suppression annulée.")
+                continue
+            try:
+                accounts.delete_account(username, password)
+                saved_session = accounts.load_saved_session()
+                if saved_session and saved_session[0].casefold() == username.casefold():
+                    accounts.clear_saved_session()
+                if os.environ.get("LOCAL_IA_ACCOUNT", "").casefold() == username.casefold():
+                    clear_session_environment()
+            except (OSError, RuntimeError, ValueError) as error:
+                ui.print_error(str(error))
+                pause()
+                continue
+            ui.print_ok(f"Compte {username} supprimé.")
+            pause()
+        elif choice == "6":
+            rename_local_account()
+        else:
+            ui.print_error("Choix invalide.")
+            pause()
+
+
 def manage_openrouter_keys():
     """Ajoute ou retire des clés du compte local sans les afficher."""
     names = accounts.list_accounts()
@@ -1470,6 +1626,9 @@ def main():
 
         if command == "force_update":
             return force_update()
+
+        if command in {"admin", "--admin"}:
+            return admin_menu()
 
         if command == "iahelp":
             from local_ia.cli.iahelp import main as iahelp_main

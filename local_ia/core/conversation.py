@@ -255,6 +255,56 @@ def delete_chat(chat_id):
     return True
 
 
+def _is_tool_health_diagnostic(message):
+    if not isinstance(message, dict) or message.get("role") != "assistant":
+        return False
+    content = str(message.get("content", "")).lstrip().casefold()
+    return content.startswith("diagnostic des outils au démarrage")
+
+
+def delete_empty_chats(exclude_ids=()):
+    """Remove startup tool diagnostics and delete conversations left empty."""
+    flush_writes()
+    excluded = set()
+    for chat_id in exclude_ids:
+        try:
+            excluded.add(int(chat_id))
+        except (TypeError, ValueError):
+            continue
+
+    deleted = []
+    for path in CHAT_DIR.glob("*.json"):
+        if not path.stem.isdigit() or int(path.stem) in excluded:
+            continue
+        chat = load_chat(int(path.stem))
+        if chat is None:
+            continue
+        messages = chat.get("messages", [])
+        remaining_messages = [
+            message for message in messages if not _is_tool_health_diagnostic(message)
+        ]
+        if len(remaining_messages) != len(messages):
+            chat["messages"] = remaining_messages
+            save_chat(chat, async_mode=False)
+        has_message_content = any(
+            isinstance(message, dict) and str(message.get("content", "")).strip()
+            for message in remaining_messages
+        )
+        has_user_data = any((
+            chat.get("files"),
+            chat.get("pending_tool"),
+            chat.get("pending_command"),
+            chat.get("code_project_path"),
+            chat.get("custom_title"),
+            chat.get("category"),
+            chat.get("topic"),
+            chat.get("summary"),
+        ))
+        if not has_message_content and not has_user_data and delete_chat(chat["id"]):
+            deleted.append(chat["id"])
+    return deleted
+
+
 def export_chat(chat_id, destination):
     chat = load_chat(chat_id)
     if chat is None:

@@ -177,6 +177,17 @@ class ContextCompiler:
                 "Pour une répétition, utilise daily, weekly ou monthly; sinon none. "
                 "Pour terminer, annuler ou reporter, liste d'abord les rappels si l'identifiant n'est pas connu."
             )
+        if route.get("action") == "habits":
+            guidance = (
+                "Gère les habitudes dans cette conversation avec l'outil habits. Pour chaque création, extrais de la phrase "
+                "la tâche, la fréquence, les jours ou le jour du mois, le moment, l'heure et le type (IA ou météo). "
+                "Convertis les heures en HH:MM et les jours en français. N'invente aucune donnée. Si la tâche ou la "
+                "fréquence est absente/ambiguë, ou si une fréquence hebdomadaire n'a pas de jours ou une fréquence "
+                "mensuelle n'a pas de jour du mois, pose une question courte avant d'appeler l'outil. Une heure est "
+                "facultative si elle n'est pas précisée; envoie time:null. Pour une météo récurrente, crée une habitude "
+                "de type weather avec le calendrier exact demandé, sans heure par défaut. Pour modifier/supprimer une "
+                "habitude, utilise list si son nom exact est inconnu et préserve les champs non concernés."
+            )
         if guidance:
             existing_code_file = route.get("existing_code_file")
             if existing_code_file:

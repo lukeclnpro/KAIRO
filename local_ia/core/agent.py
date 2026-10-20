@@ -1121,33 +1121,6 @@ class LocalAgent:
                 return f"Rappel annulé : {reminder.get('title', 'rappel')}."
         return None
 
-    def _respond_weather_habit(self, chat, selected_tools, progress_callback=None):
-        if "habits" not in selected_tools:
-            return "L'outil Habitudes n'est pas autorisé pour cette demande."
-
-        self._report_progress(progress_callback, "Programmation de la météo du matin…")
-        tool_call = {"tool": "habits", "arguments": {"action": "weather_daily"}}
-        result, verification, confirmation = self._execute_and_verify(
-            tool_call,
-            chat,
-            selected_tools,
-        )
-        if confirmation is not None:
-            return str(confirmation)
-        if verification is None or not verification.get("success"):
-            return self._verification_failure("habits", verification or {})
-        if not isinstance(result, dict):
-            return "Je n'ai pas pu enregistrer l'habitude météo."
-
-        self._report_progress(progress_callback, "Météo du jour récupérée; habitude enregistrée.")
-        schedule = f"tous les jours à 08:00 pour {result.get('city', 'ta ville')}"
-        if result.get("weather_error"):
-            return (
-                f"Habitude météo enregistrée {schedule}, mais la météo est indisponible pour le moment : "
-                f"{result.get('weather', 'erreur inconnue')}"
-            )
-        return f"{result.get('weather', '')}\n\nHabitude météo enregistrée : {schedule}."
-
     def _record_generated_download(self, filename, content):
         try:
             artifact = download_tool.use(filename, content)
@@ -1249,12 +1222,6 @@ class LocalAgent:
             self._report_progress(progress_callback, "Réponse directe prête.")
             return direct_answer
         assert route is not None and selected_tools is not None
-        if route.get("action") == "weather_habit":
-            return self._respond_weather_habit(
-                chat,
-                selected_tools,
-                progress_callback=progress_callback,
-            )
         if (
             os.environ.get("LOCAL_IA_PROVIDER", "").strip().casefold() != "ollama"
             and openrouter_api_keys()

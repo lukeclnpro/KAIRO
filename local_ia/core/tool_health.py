@@ -24,6 +24,98 @@ class ProbeBlocked(RuntimeError):
     """Un prérequis utilisateur manque ou l'action ne peut pas être sûre en fond."""
 
 
+TOOL_PROBLEM_GUIDE = (
+    {
+        "title": "Clé OpenRouter absente",
+        "patterns": ("clé openrouter absente", "no api key", "missing api key", "api key is required"),
+        "message": "La traduction cloud ne peut pas démarrer sans clé API.",
+        "action": "Connecte-toi à OpenRouter et ajoute ou active une clé dans Compte → Gérer les clés API.",
+    },
+    {
+        "title": "Clé API refusée",
+        "patterns": ("invalid api key", "invalid key", "unauthorized", "401", "clé invalide", "authentification refusée"),
+        "message": "Le service a refusé les identifiants configurés.",
+        "action": "Vérifie la clé OpenRouter, son état et le compte associé.",
+    },
+    {
+        "title": "Quota ou crédits épuisés",
+        "patterns": ("insufficient_quota", "quota exceeded", "billing", "credit balance", "402", "crédits insuffisants"),
+        "message": "Le fournisseur refuse la requête car le quota ou le solde disponible est insuffisant.",
+        "action": "Vérifie le quota, les crédits et les limites de facturation du compte fournisseur.",
+    },
+    {
+        "title": "Limite de requêtes atteinte",
+        "patterns": ("rate limit", "too many requests", "429", "trop de requêtes"),
+        "message": "Le fournisseur limite temporairement le nombre de requêtes.",
+        "action": "Attends un peu puis relance le diagnostic ou réduis le rythme des demandes.",
+    },
+    {
+        "title": "Serveur Ollama inaccessible",
+        "patterns": ("ollama", "connection refused", "failed to connect", "connexion refusée", "serveur inaccessible"),
+        "message": "KAIRO ne parvient pas à joindre le serveur Ollama configuré.",
+        "action": "Démarre Ollama et vérifie son adresse dans Paramètres → IA & modèles.",
+        "requires_any": ("ollama",),
+    },
+    {
+        "title": "Navigateur indisponible",
+        "patterns": ("aucun navigateur par défaut", "no browser", "webbrowser.error", "browser not found"),
+        "message": "Aucun navigateur par défaut n’est disponible pour ce test.",
+        "action": "Installe un navigateur et définis-le comme navigateur par défaut du système.",
+    },
+    {
+        "title": "Connexion réseau impossible",
+        "patterns": (
+            "connectionerror", "connection refused", "network is unreachable",
+            "failed to establish a new connection", "temporary failure in name resolution",
+            "name or service not known", "nodename nor servname", "dns",
+            "connexion réseau", "internet unavailable", "openrouter inaccessible",
+        ),
+        "message": "KAIRO ne parvient pas à joindre le service distant. La connexion Internet ou le serveur peut être indisponible.",
+        "action": "Vérifie Internet, le VPN/proxy et l’adresse du fournisseur, puis relance le diagnostic.",
+    },
+    {
+        "title": "Délai d’attente dépassé",
+        "patterns": ("timeoutexception", "timed out", "read timeout", "connect timeout", "délai dépassé", "timeout"),
+        "message": "Le service n’a pas répondu dans le délai prévu.",
+        "action": "Réessaie quand le réseau ou le service sera moins chargé; vérifie aussi le pare-feu.",
+    },
+    {
+        "title": "Permission refusée",
+        "patterns": ("permissionerror", "permission denied", "access is denied", "accès refusé", "operation not permitted"),
+        "message": "KAIRO n’a pas les droits nécessaires pour effectuer cette action.",
+        "action": "Vérifie les droits du dossier ou de l’application ciblée, sans élargir les accès inutilement.",
+    },
+    {
+        "title": "Fichier ou dépendance introuvable",
+        "patterns": ("filenotfounderror", "no such file or directory", "modulenotfounderror", "no module named", "not found"),
+        "message": "Un fichier, programme ou module requis n’a pas été trouvé.",
+        "action": "Vérifie le chemin et l’installation de la dépendance indiquée dans le log détaillé.",
+    },
+)
+
+
+def explain_tool_problem(detail="", traceback_text="", stderr="", status="failed"):
+    """Translate a common tool diagnostic into a concise French explanation."""
+    diagnostic = "\n".join(str(value or "") for value in (detail, traceback_text, stderr)).casefold()
+    for problem in TOOL_PROBLEM_GUIDE:
+        if any(pattern in diagnostic for pattern in problem["patterns"]):
+            if "requires_any" not in problem or any(
+                token in diagnostic for token in problem["requires_any"]
+            ):
+                return problem
+    if status == "blocked":
+        return {
+            "title": "Prérequis manquant",
+            "message": "Le test ne peut pas être exécuté dans la configuration actuelle.",
+            "action": "Lis le détail du blocage ci-dessous et complète le prérequis indiqué.",
+        }
+    return {
+        "title": "Erreur non reconnue",
+        "message": "KAIRO n’a pas pu terminer ce test; le log brut peut préciser la cause.",
+        "action": "Consulte le détail et la trace complète, puis relance le diagnostic après correction.",
+    }
+
+
 def _execute(tool_name, arguments, connection, workspace):
     tool_call = {"tool": tool_name, "arguments": arguments}
     result = ToolManager.execute(

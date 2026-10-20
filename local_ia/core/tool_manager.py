@@ -26,7 +26,7 @@ Outils et arguments :
 - edit : {"path":"...", "old":"texte exact", "new":"remplacement"} — corriger une partie d'un fichier.
 - launch : {"name":"..."} — lancer une application par son nom ou son chemin ; mémoriser tout chemin fourni.
 - reminder : {"action":"create|list|complete|cancel|snooze", ...} — gérer des rappels locaux persistants.
-- habits : {"action":"list|add|update|delete|activate|deactivate|complete|set_city|weather_now|weather_daily|preview", ...} — gérer les habitudes; weather_daily programme la météo chaque matin et renvoie la météo actuelle; preview génère le texte d'une habitude sans la marquer comme notifiée.
+- habits : {"action":"list|add|update|delete|activate|deactivate|complete|set_city|weather_now|preview", ...} — gérer les habitudes; extraire le calendrier demandé en langage naturel et clarifier toute donnée requise absente; preview génère le texte d'une habitude sans la marquer comme notifiée.
 - command : {"argv":["programme","argument"], "cwd":"/dossier"} — exécuter une commande, sans shell ni pipe.
 - system : {"action":"info|up|down|mute|unmute|install_app|install|update", "value":"nom-application-ou-paquet"}
 - calculator : {"expression":"sqrt(81) + 12 * 3"} — calculer une expression arithmétique.

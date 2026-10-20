@@ -238,7 +238,7 @@ class RequestRouter:
             return {"mode": "tool", "action": "translate", "tools": ("translate",), "answer": None}
 
         if _WEATHER_REQUEST.search(text) and _WEATHER_ROUTINE.search(text):
-            return {"mode": "tool", "action": "weather_habit", "tools": ("habits",), "answer": None}
+            return {"mode": "tool", "action": "habits", "tools": ("habits",), "answer": None}
 
         if _HABITS_INTENT.search(text):
             return {"mode": "tool", "action": "habits", "tools": ("habits",), "answer": None}
