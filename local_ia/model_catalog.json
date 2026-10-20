@@ -266,7 +266,7 @@
         "id": "deepseek-r1:14b",
         "name": "deepseek-r1:14b",
         "provider": "ollama",
-        "installed": true,
+        "installed": false,
         "chat_compatible": true,
         "description": "Version plus importante pour les problèmes de raisonnement complexes.",
         "recommended_size": "~9 GB",
@@ -601,7 +601,7 @@
       "qwen2.5:1.5b": {
         "id": "qwen2.5:1.5b",
         "name": "qwen2.5:1.5b",
-        "installed": true,
+        "installed": false,
         "chat_compatible": true,
         "provider": "ollama",
         "available": true,
@@ -621,8 +621,8 @@
     "openrouter": {
       "openai/gpt-4o-mini": {
         "id": "openai/gpt-4o-mini",
-        "name": "OpenAI: GPT-4o-mini",
-        "available": true,
+        "name": "openai/gpt-4o-mini",
+        "available": false,
         "chat_compatible": true,
         "provider": "openrouter",
         "categories": [
@@ -54790,5 +54790,5 @@
       }
     }
   },
-  "updated_at": "2026-10-20T16:31:19+02:00"
+  "updated_at": "2026-10-20T20:39:19+02:00"
 }

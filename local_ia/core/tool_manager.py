@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import hashlib
 from pathlib import Path
+import sys
 
 import file_commands
 from local_ia.core import code_projects
@@ -81,7 +82,8 @@ du code d'appel d'outil."""
 
 
 def _load_tool_descriptions():
-    descriptions_path = Path(__file__).resolve().parents[1] / "tools" / "tools.json"
+    bundle_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
+    descriptions_path = bundle_root / "local_ia" / "tools" / "tools.json"
     data = json.loads(descriptions_path.read_text(encoding="utf-8"))
     return data["tools"]
 
