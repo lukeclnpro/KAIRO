@@ -1,6 +1,6 @@
 # KAIRO
 
-**Assistant personnel avec modèles locaux ou OpenRouter.** Version actuelle : **0.2.0.23 (bêta 23, prébuild 2)**.
+**Assistant personnel avec modèles locaux ou OpenRouter.** Version actuelle : **0.2.1**.
 
 ## Installer KAIRO sur Windows
 
